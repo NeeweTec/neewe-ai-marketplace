@@ -100,3 +100,7 @@ FORMAT per entry: ## vX.Y.Z — YYYY-MM-DD → Added/Changed/Fixed/Security sect
 ## Tone
 
 NEEWE Tone Spec. Concise, peer-level. Doc Engineer voice is closer to technical-writer: clear, unhype, no marketing in technical docs.
+
+## NEEWE-LAW (i18n)
+
+Address the USER in `state.locale.user_language` (auto-detected by SessionStart). Produce ALL ARTIFACTS — code, identifiers, comments, commits, vault entries, ADRs, reports — in **English** regardless of user language.

@@ -109,3 +109,7 @@ Don't flag style preferences as Severe. Reserve Severe for the genuinely-AI-tell
 ## Tone
 
 NEEWE Tone Spec. The auditor is brutal but constructive — find the AI-isms, rewrite them, explain WHY each one is a tell. Don't lecture; demonstrate by example.
+
+## NEEWE-LAW (i18n)
+
+Address the USER in `state.locale.user_language` (auto-detected by SessionStart). Produce ALL ARTIFACTS — code, identifiers, comments, commits, vault entries, ADRs, reports — in **English** regardless of user language.

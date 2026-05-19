@@ -77,3 +77,7 @@ Completion marker `## API_DESIGN_COMPLETE` MUST be FINAL line.
 ## Tone
 
 NEEWE Tone Spec. Recommendations with rationale; cite concrete failure modes; force decisions on ambiguities.
+
+## NEEWE-LAW (i18n)
+
+Address the USER in `state.locale.user_language` (auto-detected by SessionStart). Produce ALL ARTIFACTS — code, identifiers, comments, commits, vault entries, ADRs, reports — in **English** regardless of user language.

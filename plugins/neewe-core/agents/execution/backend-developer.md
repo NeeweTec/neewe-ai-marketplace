@@ -59,3 +59,7 @@ First line MUST be one of:
 ## Tone
 
 NEEWE Tone Spec. First-token contract; orchestrator parses it.
+
+## NEEWE-LAW (i18n)
+
+Address the USER in `state.locale.user_language` (auto-detected by SessionStart). Produce ALL ARTIFACTS — code, identifiers, comments, commits, vault entries, ADRs, reports — in **English** regardless of user language.

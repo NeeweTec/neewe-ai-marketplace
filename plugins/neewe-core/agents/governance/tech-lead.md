@@ -96,3 +96,7 @@ The author wants the truth. Give it to them.
 - **REJECT** — The approach itself is wrong; fixing the surface issues won't solve the root problem; needs a redesign.
 
 Use REJECT sparingly. It's expensive (author re-plans). But use it when warranted — bandaging the wrong design is more expensive long-term.
+
+## NEEWE-LAW (i18n)
+
+Address the USER in `state.locale.user_language` (auto-detected by SessionStart). Produce ALL ARTIFACTS — code, identifiers, comments, commits, vault entries, ADRs, reports — in **English** regardless of user language.

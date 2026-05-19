@@ -3,8 +3,11 @@
 # Reads the using-neewe SKILL.md from the plugin and injects it as additionalContext
 # on every session startup, clear, or compact event.
 #
-# Inspired by Superpowers' hooks/session-start. Polyglot-wrapped by run-hook.cmd
-# so it works on Windows (Git Bash) and Unix without duplicate files.
+# v0.8.0 additions:
+# - Detects user language from latest prompt + OS locale + settings override
+# - Persists state.locale.user_language for downstream consumers (TUI, dashboard, agents)
+# - Injects a locale directive into additionalContext so the model addresses the user
+#   in their native language while producing artifacts in English.
 
 set -euo pipefail
 
@@ -16,23 +19,114 @@ if [ -z "$PLUGIN_ROOT" ]; then
 fi
 
 SKILL_PATH="${PLUGIN_ROOT}/skills/using-neewe/SKILL.md"
+I18N_DIR="${PLUGIN_ROOT}/i18n"
 
 # If the skill is missing, emit empty additionalContext rather than breaking the session.
-# Surface a stderr warning so a misconfigured install doesn't silently no-op (D4 fix).
 if [ ! -f "$SKILL_PATH" ]; then
   echo "[neewe-session-start] WARN: using-neewe SKILL.md not found at $SKILL_PATH (CLAUDE_PLUGIN_ROOT=$PLUGIN_ROOT). Verify NEEWE plugin install." >&2
   printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":""}}'
   exit 0
 fi
 
-# Read SKILL.md body (strip YAML frontmatter for token economy — keep the doctrine, drop the metadata).
+# ── Read SKILL.md body (strip YAML frontmatter for token economy) ─────────────
 SKILL_CONTENT=$(awk 'BEGIN{frontmatter=0; done=0} /^---$/ { if (frontmatter == 0) { frontmatter=1; next } else { frontmatter=0; done=1; next } } done==1 { print }' "$SKILL_PATH")
 
-# Append phase-state context if .neewe/state.json exists in the project.
-# Agents read this to know current phase/mode/goal without an extra tool call.
-# Uses jq if available; falls back to python3/python (D2 fix — Windows hosts
-# without jq were silently dropping this block).
+# ── Locale detection ──────────────────────────────────────────────────────────
+# Precedence: settings override → state persisted → input prompt heuristic → $LANG → default
+
+USER_LANGUAGE=""
+LOCALE_SOURCE=""
+
+# Read Claude Code hook payload (JSON on stdin). Buffer it; we may need the
+# user prompt for heuristic detection.
+HOOK_STDIN=""
+if [ ! -t 0 ]; then
+  HOOK_STDIN=$(cat 2>/dev/null || true)
+fi
+
+# 1. Explicit override from settings.local.json
+if [ -f ".claude/settings.local.json" ]; then
+  if command -v node >/dev/null 2>&1; then
+    OVERRIDE=$(node -e "try{const s=require('./.claude/settings.local.json');process.stdout.write((s.neewe&&s.neewe.language)||'')}catch(e){}" 2>/dev/null || true)
+    if [ -n "$OVERRIDE" ]; then
+      USER_LANGUAGE="$OVERRIDE"
+      LOCALE_SOURCE="settings"
+    fi
+  fi
+fi
+
+# 2. State persisted from prior session
 STATE_FILE=".neewe/state.json"
+if [ -z "$USER_LANGUAGE" ] && [ -f "$STATE_FILE" ]; then
+  if command -v node >/dev/null 2>&1; then
+    PERSISTED=$(node -e "try{const s=require('./.neewe/state.json');process.stdout.write((s.locale&&s.locale.user_language)||'')}catch(e){}" 2>/dev/null || true)
+    if [ -n "$PERSISTED" ]; then
+      USER_LANGUAGE="$PERSISTED"
+      LOCALE_SOURCE="state"
+    fi
+  fi
+fi
+
+# 3. Heuristic detection from latest user prompt in hook payload
+if [ -z "$USER_LANGUAGE" ] && [ -n "$HOOK_STDIN" ] && [ -f "$I18N_DIR/detect.js" ] && command -v node >/dev/null 2>&1; then
+  # Extract the most recent user message from the hook payload.
+  PROMPT_TEXT=$(printf '%s' "$HOOK_STDIN" | node -e "
+let buf='';process.stdin.on('data',c=>buf+=c);process.stdin.on('end',()=>{
+  try{const p=JSON.parse(buf);
+    // Claude Code SessionStart payload may carry { transcript:[{role,content}], prompt:'...' }
+    let t='';
+    if(p.prompt)t=p.prompt;
+    else if(Array.isArray(p.transcript)){
+      for(let i=p.transcript.length-1;i>=0;i--){if(p.transcript[i].role==='user'){t=p.transcript[i].content||'';break;}}
+    }
+    process.stdout.write(typeof t==='string'?t:JSON.stringify(t));
+  }catch(e){}
+});
+" 2>/dev/null || true)
+
+  if [ -n "$PROMPT_TEXT" ]; then
+    DETECT=$(printf '%s' "$PROMPT_TEXT" | node "$I18N_DIR/detect.js" 2>/dev/null || true)
+    if [ -n "$DETECT" ]; then
+      CAND=$(printf '%s' "$DETECT" | node -e "let b='';process.stdin.on('data',c=>b+=c);process.stdin.on('end',()=>{try{const o=JSON.parse(b);if(o.confidence>=0.5)process.stdout.write(o.locale)}catch(e){}})" 2>/dev/null || true)
+      if [ -n "$CAND" ]; then
+        USER_LANGUAGE="$CAND"
+        LOCALE_SOURCE="heuristic"
+      fi
+    fi
+  fi
+fi
+
+# 4. OS locale ($LANG / $LC_ALL)
+if [ -z "$USER_LANGUAGE" ]; then
+  OS_LANG="${LC_ALL:-${LANG:-}}"
+  case "$OS_LANG" in
+    pt_BR*|pt-BR*|pt_PT*|pt-PT*) USER_LANGUAGE="pt-BR"; LOCALE_SOURCE="env" ;;
+    en_*|en-*|C|POSIX|"")        USER_LANGUAGE="en-US"; LOCALE_SOURCE="env" ;;
+    *)                            USER_LANGUAGE="en-US"; LOCALE_SOURCE="default" ;;
+  esac
+fi
+
+# Persist detected locale to state.json (best-effort, never fail the hook)
+if [ -f "$STATE_FILE" ] && command -v node >/dev/null 2>&1; then
+  node -e "
+try{
+  const fs=require('fs');const p='./.neewe/state.json';
+  const s=JSON.parse(fs.readFileSync(p,'utf8'));
+  s.locale=s.locale||{};
+  if(s.locale.user_language!==process.env.NEEWE_DETECTED_LOCALE){
+    s.locale.user_language=process.env.NEEWE_DETECTED_LOCALE;
+    s.locale.source=process.env.NEEWE_LOCALE_SOURCE;
+    fs.writeFileSync(p,JSON.stringify(s,null,2));
+  }
+}catch(e){}
+" 2>/dev/null || true
+fi
+export NEEWE_DETECTED_LOCALE="$USER_LANGUAGE" NEEWE_LOCALE_SOURCE="$LOCALE_SOURCE"
+
+# Locale directive injected into additionalContext
+LOCALE_BLOCK=$(printf '\n\n---\n\n## User Language\n\n- **Detected language:** `%s` (source: %s)\n- **NEEWE-LAW (i18n):** Address the USER in `%s`. Produce ALL ARTIFACTS — code, identifiers, comments, commit messages, vault entries, ADRs, agent outputs, gate reports — in English regardless of user language. Override by setting `neewe.language` in `.claude/settings.local.json`.\n' "$USER_LANGUAGE" "$LOCALE_SOURCE" "$USER_LANGUAGE")
+
+# ── Runtime state block (existing logic, preserved) ───────────────────────────
 if [ -f "$STATE_FILE" ]; then
   STATE_BLOCK=""
   if command -v jq >/dev/null 2>&1; then
@@ -42,7 +136,7 @@ if [ -f "$STATE_FILE" ]; then
     SQUAD=$(jq -r '.active_squad // "none"' "$STATE_FILE")
     BUDGET_CAP=$(jq -r '.cost_budget.cap_usd // 0' "$STATE_FILE")
     BUDGET_SPENT=$(jq -r '.cost_budget.spent_usd // 0' "$STATE_FILE")
-    STATE_BLOCK=$(printf '\n\n---\n\n## Current NEEWE Runtime State\n\n- **Phase:** %s\n- **Mode:** %s\n- **Active goal:** %s\n- **Active squad:** %s\n- **Cost budget:** $%.2f spent of $%.2f cap\n\nUse `neewe show` to inspect full state. Run `neewe set-phase <phase>` to transition. Read the `neewe-state` skill for the schema reference.\n' "$PHASE" "$MODE" "$GOAL" "$SQUAD" "$BUDGET_SPENT" "$BUDGET_CAP")
+    STATE_BLOCK=$(printf '\n\n---\n\n## Current NEEWE Runtime State\n\n- **Stage:** %s\n- **Mode:** %s\n- **Active goal:** %s\n- **Active squad:** %s\n- **Cost budget:** $%.2f spent of $%.2f cap\n\nUse `neewe show` to inspect full state. Run `neewe set-phase <phase>` to transition. Read the `neewe-state` skill for the schema reference.\n' "$PHASE" "$MODE" "$GOAL" "$SQUAD" "$BUDGET_SPENT" "$BUDGET_CAP")
   elif command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1; then
     PY="$(command -v python3 2>/dev/null || command -v python)"
     STATE_BLOCK=$("$PY" - "$STATE_FILE" <<'PYEOF'
@@ -69,7 +163,7 @@ print(f"""
 
 ## Current NEEWE Runtime State
 
-- **Phase:** {phase}
+- **Stage:** {phase}
 - **Mode:** {mode}
 - **Active goal:** {goal}
 - **Active squad:** {squad}
@@ -86,21 +180,23 @@ PYEOF
   fi
 fi
 
-# JSON-escape via printf + jq if available, else fallback to python.
+# Append the locale directive AFTER the runtime state so the model reads it last
+SKILL_CONTENT="${SKILL_CONTENT}${LOCALE_BLOCK}"
+
+# ── JSON-escape ───────────────────────────────────────────────────────────────
 if command -v jq >/dev/null 2>&1; then
   ESCAPED=$(printf '%s' "$SKILL_CONTENT" | jq -Rs .)
+elif command -v node >/dev/null 2>&1; then
+  ESCAPED=$(printf '%s' "$SKILL_CONTENT" | node -e "let b='';process.stdin.on('data',c=>b+=c);process.stdin.on('end',()=>process.stdout.write(JSON.stringify(b)))")
 elif command -v python3 >/dev/null 2>&1; then
   ESCAPED=$(printf '%s' "$SKILL_CONTENT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
 elif command -v python >/dev/null 2>&1; then
   ESCAPED=$(printf '%s' "$SKILL_CONTENT" | python -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
 else
-  # Last-resort manual escape (handles the common cases; full robustness needs jq/python).
   ESCAPED=$(printf '%s' "$SKILL_CONTENT" | awk 'BEGIN{ORS=""} {gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/\t/, "\\t"); print; print "\\n"}')
   ESCAPED="\"${ESCAPED}\""
 fi
 
-# Detect harness via env or input JSON to choose the right output shape.
-# Default: Claude Code shape (nested under hookSpecificOutput.additionalContext).
 HARNESS="${CLAUDE_CODE_HARNESS:-claude-code}"
 
 case "$HARNESS" in

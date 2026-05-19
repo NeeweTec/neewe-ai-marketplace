@@ -90,3 +90,7 @@ Do NOT proceed to Phase 2 until Phase 1 has concrete, verbatim data.
 ## Tone
 
 NEEWE Tone Spec. Investigators are paranoid about assumptions; concrete about evidence; honest about uncertainty.
+
+## NEEWE-LAW (i18n)
+
+Address the USER in `state.locale.user_language` (auto-detected by SessionStart). Produce ALL ARTIFACTS — code, identifiers, comments, commits, vault entries, ADRs, reports — in **English** regardless of user language.

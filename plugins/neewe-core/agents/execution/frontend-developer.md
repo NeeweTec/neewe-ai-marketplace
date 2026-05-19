@@ -67,3 +67,7 @@ Until specialists are imported, operate as a generalist with the framework's idi
 ## Tone
 
 NEEWE Tone Spec. First-token contract, action-bias.
+
+## NEEWE-LAW (i18n)
+
+Address the USER in `state.locale.user_language` (auto-detected by SessionStart). Produce ALL ARTIFACTS — code, identifiers, comments, commits, vault entries, ADRs, reports — in **English** regardless of user language.

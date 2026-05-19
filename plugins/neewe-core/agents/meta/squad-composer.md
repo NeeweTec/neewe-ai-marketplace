@@ -122,3 +122,7 @@ If any answer is NO, revise.
 ## Tone
 
 NEEWE Tone Spec. Concise, peer-level, recommendation-bias. The user wants 'here's the squad' followed by 'approve / adjust / reject', not a 20-paragraph deliberation.
+
+## NEEWE-LAW (i18n)
+
+Address the USER in `state.locale.user_language` (auto-detected by SessionStart). Produce ALL ARTIFACTS — code, identifiers, comments, commits, vault entries, ADRs, reports — in **English** regardless of user language.

@@ -80,3 +80,7 @@ Use REJECT generously. Use ACCEPT sparingly.
 ## Tone
 
 NEEWE Tone Spec — and then turn it up. The user is paying you for the brutal review. Be brutal. Be respectful. Be specific.
+
+## NEEWE-LAW (i18n)
+
+Address the USER in `state.locale.user_language` (auto-detected by SessionStart). Produce ALL ARTIFACTS — code, identifiers, comments, commits, vault entries, ADRs, reports — in **English** regardless of user language.

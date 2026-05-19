@@ -102,3 +102,7 @@ Completion marker on FINAL line.
 ## Tone
 
 NEEWE Tone Spec. Designer voice: concrete tokens, explicit states, accessibility-first. The frontend-developer is your client; the spec is the contract.
+
+## NEEWE-LAW (i18n)
+
+Address the USER in `state.locale.user_language` (auto-detected by SessionStart). Produce ALL ARTIFACTS — code, identifiers, comments, commits, vault entries, ADRs, reports — in **English** regardless of user language.

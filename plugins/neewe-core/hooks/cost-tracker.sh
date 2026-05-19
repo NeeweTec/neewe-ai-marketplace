@@ -85,5 +85,31 @@ if [ "$SHOULD_RECORD" = "1" ]; then
   bash "$NEEWE_BIN" add-cost "$AMOUNT" --tool "$TOOL_NAME" --model "$MODEL" >/dev/null 2>&1 || true
 fi
 
+# ── Threshold-deduped toast (25% / 50% / 80%) ─────────────────────────────────
+# Only fire each threshold once per goal-mode session (state-stored flags).
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/lib/toast.sh" ]; then
+  . "${CLAUDE_PLUGIN_ROOT}/hooks/lib/toast.sh"
+  if command -v node >/dev/null 2>&1; then
+    node - "$STATE_FILE" <<'NODEEOF' || true
+const fs = require('fs');
+const path = process.argv[1];
+let s; try { s = JSON.parse(fs.readFileSync(path,'utf8')); } catch(e){ process.exit(0); }
+const cb = s.cost_budget || {};
+const cap = Number(cb.cap_usd || 0);
+const spent = Number(cb.spent_usd || 0);
+if (cap <= 0) process.exit(0);
+const pct = (spent / cap) * 100;
+s.cost_budget.thresholds_fired = s.cost_budget.thresholds_fired || [];
+const fired = s.cost_budget.thresholds_fired;
+const crossed = [25, 50, 80].filter(t => pct >= t && !fired.includes(t));
+if (crossed.length === 0) process.exit(0);
+const hit = crossed[crossed.length - 1];
+fired.push(...crossed);
+fs.writeFileSync(path, JSON.stringify(s, null, 2));
+process.stderr.write(`[neewe] Cost crossed ${hit}% of cap ($${spent.toFixed(2)} of $${cap.toFixed(2)})\n`);
+NODEEOF
+  fi
+fi
+
 # Always exit 0 — cost tracking never blocks tool execution.
 exit 0

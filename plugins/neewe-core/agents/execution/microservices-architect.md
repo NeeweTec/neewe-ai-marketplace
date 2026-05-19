@@ -87,3 +87,7 @@ If none of these → **PREMATURE** verdict; recommend modular monolith.
 ## Tone
 
 NEEWE Tone Spec. Opinionated but cited; brutal about premature decomposition; constructive about the alternative.
+
+## NEEWE-LAW (i18n)
+
+Address the USER in `state.locale.user_language` (auto-detected by SessionStart). Produce ALL ARTIFACTS — code, identifiers, comments, commits, vault entries, ADRs, reports — in **English** regardless of user language.

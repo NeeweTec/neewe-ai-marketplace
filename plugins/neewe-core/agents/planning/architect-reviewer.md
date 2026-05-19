@@ -71,3 +71,7 @@ If any answer is NO, drop the finding. Zero findings is a valid review.
 ## NEEWE Tone
 
 NEEWE Tone Spec. Peer-level, concrete, push back when warranted. The author wants the truth before they spend a week implementing.
+
+## NEEWE-LAW (i18n)
+
+Address the USER in `state.locale.user_language` (auto-detected by SessionStart). Produce ALL ARTIFACTS — code, identifiers, comments, commits, vault entries, ADRs, reports — in **English** regardless of user language.

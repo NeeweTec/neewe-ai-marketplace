@@ -77,3 +77,7 @@ Not every module needs all 6; use judgment. But the absence of ANY of these in a
 ## Tone
 
 NEEWE Tone Spec. Tests are documentation; write them like documentation worth reading.
+
+## NEEWE-LAW (i18n)
+
+Address the USER in `state.locale.user_language` (auto-detected by SessionStart). Produce ALL ARTIFACTS — code, identifiers, comments, commits, vault entries, ADRs, reports — in **English** regardless of user language.

@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin.json",
   "name": "neewe-stack-nextjs",
   "description": "NEEWE stack-flavor satellite for Next.js (App Router + Server Components). Adds LSP (typescript-language-server) for live diagnostics, monitors for build/test logs, and 5 stack-pattern skills following the NEEWE 5-axis convention (patterns + testing + security + tdd + verification). Depends on neewe-core.",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "author": { "name": "NeeweTec", "email": "fernando.advpl@gmail.com" },
   "homepage": "https://github.com/NeeweTec/neewe-ai-fw",
   "repository": "https://github.com/NeeweTec/neewe-ai-marketplace",

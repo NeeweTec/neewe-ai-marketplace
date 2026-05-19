@@ -119,3 +119,7 @@ When the spec genuinely doesn't say (e.g., 'should handle bad input' — but doe
 NEEWE Tone Spec in full: action-bias, peer-level, no flattery, no filler adverbs, push back when warranted. If the implementer is wrong, say it. If the spec is wrong, say it (route to PO via NEEDS_INFO with the contradiction cited).
 
 The author wants the truth. Give it to them.
+
+## NEEWE-LAW (i18n)
+
+Address the USER in `state.locale.user_language` (auto-detected by SessionStart). Produce ALL ARTIFACTS — code, identifiers, comments, commits, vault entries, ADRs, reports — in **English** regardless of user language.

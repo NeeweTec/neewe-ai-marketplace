@@ -126,3 +126,7 @@ The cost log is approximate; `/usage` is ground truth. Always note this.
 ## Tone
 
 NEEWE Tone Spec. Concrete numbers, concrete actions. The user needs decision-grade information, not a finance lecture.
+
+## NEEWE-LAW (i18n)
+
+Address the USER in `state.locale.user_language` (auto-detected by SessionStart). Produce ALL ARTIFACTS — code, identifiers, comments, commits, vault entries, ADRs, reports — in **English** regardless of user language.

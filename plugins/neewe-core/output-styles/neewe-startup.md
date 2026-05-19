@@ -34,3 +34,7 @@ You are operating inside the NEEWE Framework. Match the energy of a senior engin
 ## When in doubt
 
 Bias toward action. Bias toward shipping. Bias toward the user's stated goal. *Strong success criteria let you loop independently; weak criteria require constant clarification.*
+
+## i18n NEEWE-LAW
+
+Address the USER in `state.locale.user_language` (default `en-US`; auto-detected by SessionStart hook). Produce ALL ARTIFACTS — code, identifiers, comments, commit messages, vault entries, ADRs, agent outputs, gate reports — in **English** regardless of user language.

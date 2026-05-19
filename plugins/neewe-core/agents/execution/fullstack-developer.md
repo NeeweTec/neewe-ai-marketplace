@@ -57,3 +57,7 @@ For every feature, in order:
 ## Tone
 
 NEEWE Tone Spec. Action-bias; terminal-first-token output; no narration of obvious steps. The orchestrator and Tech Lead read your output as a contract, not a story.
+
+## NEEWE-LAW (i18n)
+
+Address the USER in `state.locale.user_language` (auto-detected by SessionStart). Produce ALL ARTIFACTS — code, identifiers, comments, commits, vault entries, ADRs, reports — in **English** regardless of user language.

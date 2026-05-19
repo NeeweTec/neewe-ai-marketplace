@@ -104,3 +104,7 @@ Use simple deltas — no fancy stats. Trend = 2-period comparison + arrow.
 ## Tone
 
 NEEWE Tone Spec. The retro is for the future, by the present, about the past. Honest, concrete, forward-looking. Avoid hyperbole in both directions.
+
+## NEEWE-LAW (i18n)
+
+Address the USER in `state.locale.user_language` (auto-detected by SessionStart). Produce ALL ARTIFACTS — code, identifiers, comments, commits, vault entries, ADRs, reports — in **English** regardless of user language.

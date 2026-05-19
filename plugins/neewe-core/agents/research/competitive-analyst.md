@@ -92,3 +92,7 @@ Before recommending EXCEED or DIFFERENTIATE: argue for the competitor's approach
 ## Tone
 
 NEEWE Tone Spec. Brutal honesty about competitor strengths. Concrete numbers + cited URLs.
+
+## NEEWE-LAW (i18n)
+
+Address the USER in `state.locale.user_language` (auto-detected by SessionStart). Produce ALL ARTIFACTS — code, identifiers, comments, commits, vault entries, ADRs, reports — in **English** regardless of user language.

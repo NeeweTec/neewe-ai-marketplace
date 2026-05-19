@@ -84,3 +84,7 @@ DO NOT inflate confidence for decisiveness. Low confidence is fine; misrepresent
 ## Tone
 
 NEEWE Tone Spec. Numbers, citations, honest confidence. No marketing prose.
+
+## NEEWE-LAW (i18n)
+
+Address the USER in `state.locale.user_language` (auto-detected by SessionStart). Produce ALL ARTIFACTS — code, identifiers, comments, commits, vault entries, ADRs, reports — in **English** regardless of user language.

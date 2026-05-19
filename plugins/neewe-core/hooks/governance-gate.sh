@@ -168,13 +168,31 @@ if fail "$PO_VERDICT"; then
   BLOCK_REASONS+=("PO: ${PO_VERDICT} (see ${RUN_DIR}/po.log)")
 fi
 
+# Toast helper (verbosity-aware) — sourced from plugin
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/lib/toast.sh" ]; then
+  # shellcheck source=lib/toast.sh
+  . "${CLAUDE_PLUGIN_ROOT}/hooks/lib/toast.sh"
+else
+  toast() { printf '[neewe] %s\n' "$1" >&2; }
+fi
+
+verdict_icon() {
+  case "$1" in
+    PASS|APPROVE|ACCEPT|DONE|READY|RESOLVED) printf '✓' ;;
+    *) printf '✗' ;;
+  esac
+}
+
 if [ "$BLOCKED" = "1" ]; then
-  echo "[governance-gate] BLOCKED at phase=${PHASE} — at least one verdict failed:" >&2
-  for r in "${BLOCK_REASONS[@]}"; do echo "  - $r" >&2; done
-  echo "  Aggregate: ${RUN_DIR}/aggregate.json" >&2
-  echo "  Latest:    ${GATE_DIR}/latest/" >&2
+  toast "Governance review: BLOCKED at stage=${PHASE}"
+  for r in "${BLOCK_REASONS[@]}"; do toast "  - $r"; done
+  toast "Aggregate: ${RUN_DIR}/aggregate.json"
   exit 2
 fi
 
-echo "[governance-gate] PASS at phase=${PHASE} — QA=${QA_VERDICT} TL=${TL_VERDICT} PO=${PO_VERDICT}" >&2
+# Toast each verdict on PASS so the user sees the trio approved
+toast "Governance review (stage=${PHASE}):"
+toast "  $(verdict_icon "$QA_VERDICT") QA: ${QA_VERDICT}"
+toast "  $(verdict_icon "$TL_VERDICT") Tech Lead: ${TL_VERDICT}"
+toast "  $(verdict_icon "$PO_VERDICT") PO: ${PO_VERDICT}"
 exit 0
