@@ -70,6 +70,18 @@
     <h2>Event Log <span class="hint">(vault/log.md tail)</span></h2>
     <ul id="event-list"><li><em>no events yet</em></li></ul>
   </section>
+
+  <!-- Settings (PATCH) -->
+  <section class="panel" id="panel-settings">
+    <h2>Settings (safe-to-edit) <span class="hint">(.claude/settings.local.json)</span></h2>
+    <form id="settings-form">
+      <div id="settings-fields"><em>loading…</em></div>
+      <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
+        <button type="submit" id="settings-save" style="background:#238636;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font:inherit">Save</button>
+        <span id="settings-status" style="color:var(--text-dim);font-size:12px"></span>
+      </div>
+    </form>
+  </section>
 </main>
 
 <footer>

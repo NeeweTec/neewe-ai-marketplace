@@ -130,6 +130,65 @@ function getGates() {
   return out;
 }
 
+// Safe-to-edit subset of settings.json fields. Anything not in this allowlist
+// is read-only via the dashboard (must edit via CLI or hand-edit settings.json).
+const SAFE_SETTINGS_FIELDS = new Set([
+  'model', 'effortLevel', 'fastMode', 'fastModePerSessionOptIn', 'outputStyle',
+  'alwaysThinkingEnabled', 'showThinkingSummaries', 'autoConnectIde',
+]);
+
+function getSafeSettings() {
+  // Read .claude/settings.local.json (project-local) — that's the editable layer.
+  // NEVER show or write to managed-settings.json from the dashboard.
+  let settings = {};
+  try { settings = JSON.parse(fs.readFileSync('.claude/settings.local.json', 'utf8')); } catch {}
+  const filtered = {};
+  for (const k of SAFE_SETTINGS_FIELDS) {
+    if (settings[k] !== undefined) filtered[k] = settings[k];
+  }
+  // Provide schema metadata so UI can render appropriate controls.
+  return {
+    current: filtered,
+    schema: {
+      model: { type: 'enum', options: ['opusplan', 'opus', 'sonnet', 'haiku', 'opus[1m]', 'sonnet[1m]'] },
+      effortLevel: { type: 'enum', options: ['low', 'medium', 'high', 'xhigh'] },
+      fastMode: { type: 'boolean' },
+      fastModePerSessionOptIn: { type: 'boolean' },
+      outputStyle: { type: 'string', placeholder: 'NEEWE Startup' },
+      alwaysThinkingEnabled: { type: 'boolean' },
+      showThinkingSummaries: { type: 'boolean' },
+      autoConnectIde: { type: 'boolean' },
+    },
+    file: '.claude/settings.local.json',
+    note: 'Only safe-to-edit fields are exposed. Other fields require CLI or hand-edit. The file is git-ignored by default.',
+  };
+}
+
+function handleSettingsPatch(req, res) {
+  let body = '';
+  req.on('data', chunk => { body += chunk; if (body.length > 65536) req.connection.destroy(); });
+  req.on('end', () => {
+    let patch;
+    try { patch = JSON.parse(body); } catch { return sendJson(res, 400, { error: 'invalid JSON' }); }
+    if (!patch || typeof patch !== 'object') return sendJson(res, 400, { error: 'expected JSON object' });
+    // Validate every key is in the safe-list.
+    const rejected = Object.keys(patch).filter(k => !SAFE_SETTINGS_FIELDS.has(k));
+    if (rejected.length > 0) return sendJson(res, 400, { error: 'rejected fields not in safe-list', rejected });
+    // Load existing local settings, merge, write atomically.
+    let existing = {};
+    try { existing = JSON.parse(fs.readFileSync('.claude/settings.local.json', 'utf8')); } catch {}
+    const merged = { ...existing, ...patch };
+    try {
+      fs.mkdirSync('.claude', { recursive: true });
+      fs.writeFileSync('.claude/settings.local.json.tmp', JSON.stringify(merged, null, 2));
+      fs.renameSync('.claude/settings.local.json.tmp', '.claude/settings.local.json');
+      return sendJson(res, 200, { ok: true, applied: patch, file: '.claude/settings.local.json' });
+    } catch (e) {
+      return sendJson(res, 500, { error: 'write failed', detail: e.message });
+    }
+  });
+}
+
 function tailEvents(maxLines = 100) {
   // For now, "events" = vault/log.md tail (chronological project events) + cost-log tail.
   const events = [];
@@ -178,6 +237,11 @@ function startServer(port, token, uiDir) {
       if (url.pathname === '/api/cost') return sendJson(res, 200, getCostSummary());
       if (url.pathname === '/api/gates') return sendJson(res, 200, getGates());
       if (url.pathname === '/api/events-snapshot') return sendJson(res, 200, { events: tailEvents() });
+      if (url.pathname === '/api/settings/safe') {
+        if (req.method === 'GET') return sendJson(res, 200, getSafeSettings());
+        if (req.method === 'PATCH') return handleSettingsPatch(req, res);
+        return sendJson(res, 405, { error: 'method not allowed' });
+      }
       return sendJson(res, 404, { error: 'unknown endpoint' });
     }
 

@@ -162,8 +162,88 @@
     };
   }
 
+  // ── Settings panel (EP-OPUS-13 Settings PATCH) ───────────────────────────
+  async function loadSettings() {
+    const data = await fetchJson('/api/settings/safe');
+    if (!data) return;
+    const container = el('settings-fields');
+    container.innerHTML = '';
+    for (const [key, meta] of Object.entries(data.schema)) {
+      const current = data.current[key];
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'display:grid;grid-template-columns:200px 1fr;gap:8px;align-items:center;margin-bottom:6px';
+      const label = document.createElement('label');
+      label.textContent = key;
+      label.style.cssText = 'font-family:var(--mono);font-size:12px;color:var(--text-dim)';
+      wrap.appendChild(label);
+
+      let input;
+      if (meta.type === 'boolean') {
+        input = document.createElement('input');
+        input.type = 'checkbox';
+        if (current === true) input.checked = true;
+      } else if (meta.type === 'enum') {
+        input = document.createElement('select');
+        for (const opt of meta.options) {
+          const o = document.createElement('option');
+          o.value = opt; o.textContent = opt;
+          if (current === opt) o.selected = true;
+          input.appendChild(o);
+        }
+      } else {
+        input = document.createElement('input');
+        input.type = 'text';
+        if (current != null) input.value = current;
+        if (meta.placeholder) input.placeholder = meta.placeholder;
+      }
+      input.name = key;
+      input.dataset.type = meta.type;
+      input.style.cssText = 'background:var(--bg-elevated);color:var(--text);border:1px solid var(--border);padding:6px 10px;border-radius:4px;font:inherit;font-family:var(--mono)';
+      wrap.appendChild(input);
+      container.appendChild(wrap);
+    }
+    const note = document.createElement('div');
+    note.style.cssText = 'margin-top:10px;color:var(--text-dim);font-size:11px';
+    note.innerHTML = `<strong>File:</strong> <code>${data.file}</code><br><em>${data.note}</em>`;
+    container.appendChild(note);
+  }
+
+  document.getElementById('settings-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const status = document.getElementById('settings-status');
+    const fields = document.querySelectorAll('#settings-fields input, #settings-fields select');
+    const patch = {};
+    for (const f of fields) {
+      const t = f.dataset.type;
+      if (t === 'boolean') patch[f.name] = f.checked;
+      else if (t === 'enum') patch[f.name] = f.value;
+      else if (f.value !== '') patch[f.name] = f.value;
+    }
+    status.textContent = 'saving…';
+    try {
+      const r = await fetch('/api/settings/safe', {
+        method: 'PATCH',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      const res = await r.json();
+      if (r.ok) {
+        status.style.color = 'var(--good)';
+        status.textContent = `saved → ${res.file}`;
+        setTimeout(() => { status.textContent = ''; status.style.color = 'var(--text-dim)'; }, 4000);
+      } else {
+        status.style.color = 'var(--bad)';
+        status.textContent = `error: ${res.error}${res.rejected ? ' (rejected: ' + res.rejected.join(',') + ')' : ''}`;
+      }
+    } catch (err) {
+      status.style.color = 'var(--bad)';
+      status.textContent = `network error: ${err.message}`;
+    }
+  });
+
   // ── Init ─────────────────────────────────────────────────────────────────
   loadAll();
+  loadSettings();
   startSSE();
   // Refresh gates + events every 10s (lower-frequency than SSE).
   setInterval(async () => {

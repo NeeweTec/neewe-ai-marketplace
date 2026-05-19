@@ -1,0 +1,287 @@
+#!/usr/bin/env node
+/**
+ * neewe-replay — EP-OPUS-6 Replay-as-First-Class-Output (Sprint 6.5)
+ *
+ * Reads .neewe/.cost-log + .neewe/vault/log.md + .neewe/gates/ + .neewe/handoffs/
+ * and generates a self-contained HTML timeline at .neewe/replays/run-<timestamp>.html.
+ *
+ * The output is a single static HTML file (no external CSS/JS deps) showing:
+ *   - Horizontal time axis (left = start, right = now/end)
+ *   - Rows: events grouped by type (cost / gate / handoff / log entry)
+ *   - Hover for details
+ *   - Cost ticker + budget bar at top
+ *   - Open with any browser; no server required; shareable via simple file send
+ *
+ * Usage:
+ *   neewe-replay                        Generate replay of all available events
+ *   neewe-replay --since <ISO-date>     Only include events after this timestamp
+ *   neewe-replay --out <path>           Custom output path (default: .neewe/replays/run-<ts>.html)
+ *
+ * Zero npm deps. Node 18+.
+ */
+
+'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
+
+const args = process.argv.slice(2);
+function arg(flag, def) {
+  const i = args.indexOf(flag);
+  return i !== -1 && args[i + 1] ? args[i + 1] : def;
+}
+
+const since = arg('--since', null);
+const outArg = arg('--out', null);
+
+// ── Defensive: ensure .neewe exists ──────────────────────────────────────
+if (!fs.existsSync('.neewe')) {
+  console.error('[neewe-replay] ERROR: no .neewe dir. Run `neewe init` + `neewe l4-init` first.');
+  process.exit(1);
+}
+
+// ── Collect events ───────────────────────────────────────────────────────
+function safeRead(file) { try { return fs.readFileSync(file, 'utf8'); } catch { return ''; } }
+function safeReadJsonl(file) {
+  return safeRead(file).trim().split('\n').filter(Boolean).map(l => {
+    try { return JSON.parse(l); } catch { return null; }
+  }).filter(Boolean);
+}
+function sinceFilter(ts) {
+  if (!since) return true;
+  return new Date(ts) >= new Date(since);
+}
+
+const events = [];
+
+// Cost events
+for (const e of safeReadJsonl('.neewe/.cost-log')) {
+  if (!sinceFilter(e.ts)) continue;
+  events.push({
+    ts: e.ts,
+    type: 'cost',
+    title: `${e.tool} (${e.model})`,
+    detail: `$${Number(e.amount_usd).toFixed(4)} on ${e.tool} via ${e.model}`,
+    amount: Number(e.amount_usd) || 0,
+  });
+}
+
+// Vault log entries
+const vaultLog = safeRead('.neewe/vault/log.md');
+const logMatches = vaultLog.match(/^## \[(\d{4}-\d{2}-\d{2})\] (\w+(?:-\w+)?) \| (.+)$/gm) || [];
+for (const line of logMatches) {
+  const m = line.match(/^## \[(\d{4}-\d{2}-\d{2})\] (\w+(?:-\w+)?) \| (.+)$/);
+  if (!m) continue;
+  const ts = `${m[1]}T00:00:00Z`;
+  if (!sinceFilter(ts)) continue;
+  events.push({ ts, type: 'vault', title: m[2], detail: m[3] });
+}
+
+// Gate verdicts
+if (fs.existsSync('.neewe/gates')) {
+  function walkGates(dir) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory() && entry.name !== 'latest') walkGates(full);
+      else if (entry.isFile() && entry.name === 'aggregate.json') {
+        try {
+          const agg = JSON.parse(fs.readFileSync(full, 'utf8'));
+          if (!agg.timestamp) continue;
+          const ts = agg.timestamp.replace(/(\d{8})T(\d{6})Z/, (_, d, t) =>
+            `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}T${t.slice(0,2)}:${t.slice(2,4)}:${t.slice(4,6)}Z`);
+          if (!sinceFilter(ts)) continue;
+          const v = agg.verdicts || {};
+          const all = [v.qa, v.tech_lead, v.po];
+          const allPass = all.every(x => /^(PASS|APPROVE|ACCEPT)$/.test(x || ''));
+          events.push({
+            ts,
+            type: 'gate',
+            title: `${agg.phase} gate`,
+            detail: `QA: ${v.qa || '?'} · TL: ${v.tech_lead || '?'} · PO: ${v.po || '?'}`,
+            passed: allPass,
+          });
+        } catch {}
+      }
+    }
+  }
+  walkGates('.neewe/gates');
+}
+
+// Handoffs
+if (fs.existsSync('.neewe/handoffs')) {
+  for (const f of fs.readdirSync('.neewe/handoffs')) {
+    if (!f.endsWith('.md')) continue;
+    const m = f.match(/(\d{8}T\d{6}Z)/);
+    if (!m) continue;
+    const ts = m[1].replace(/(\d{8})T(\d{6})Z/, (_, d, t) =>
+      `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}T${t.slice(0,2)}:${t.slice(2,4)}:${t.slice(4,6)}Z`);
+    if (!sinceFilter(ts)) continue;
+    events.push({ ts, type: 'handoff', title: 'handoff snapshot', detail: f });
+  }
+}
+
+events.sort((a, b) => new Date(a.ts) - new Date(b.ts));
+
+// Compute totals
+const totalCost = events.filter(e => e.type === 'cost').reduce((s, e) => s + e.amount, 0);
+const startTs = events[0]?.ts || new Date().toISOString();
+const endTs = events[events.length - 1]?.ts || startTs;
+const durationSec = Math.max(1, (new Date(endTs) - new Date(startTs)) / 1000);
+
+// Load current state for summary
+let state = {};
+try { state = JSON.parse(fs.readFileSync('.neewe/state.json', 'utf8')); } catch {}
+
+// ── Generate HTML ────────────────────────────────────────────────────────
+const html = `<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<title>NEEWE Replay — ${state.active_goal || 'session'}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0e1117;color:#c9d1d9;font:14px/1.5 -apple-system,BlinkMacSystemFont,sans-serif;padding:0 0 40px}
+  header{background:#161b22;border-bottom:1px solid #30363d;padding:20px 24px}
+  h1{font-size:20px;font-weight:700;letter-spacing:-0.01em;margin-bottom:8px}
+  .meta{color:#8b949e;font-family:ui-monospace,monospace;font-size:12px;display:flex;gap:24px;flex-wrap:wrap}
+  .meta strong{color:#c9d1d9}
+  main{max-width:1400px;margin:24px auto;padding:0 24px}
+  .timeline{background:#1c2128;border:1px solid #30363d;border-radius:8px;padding:24px;margin-bottom:16px;overflow-x:auto}
+  .axis{position:relative;height:24px;border-bottom:1px solid #30363d;margin-bottom:16px;font-family:ui-monospace,monospace;font-size:10px;color:#8b949e}
+  .axis span{position:absolute;transform:translateX(-50%);padding-top:8px}
+  .axis span:first-child{transform:translateX(0)}
+  .axis span:last-child{transform:translateX(-100%)}
+  .row{display:grid;grid-template-columns:120px 1fr;gap:12px;align-items:center;margin-bottom:8px;font-family:ui-monospace,monospace;font-size:12px}
+  .row-label{color:#8b949e;text-transform:uppercase;font-size:10px;letter-spacing:0.05em;font-weight:600}
+  .row-track{position:relative;height:24px;background:rgba(255,255,255,0.03);border-radius:4px}
+  .event{position:absolute;top:2px;bottom:2px;border-radius:3px;cursor:pointer;transition:transform 0.1s}
+  .event:hover{transform:scaleY(1.2);z-index:1}
+  .event.cost{background:#58a6ff;min-width:3px}
+  .event.gate{background:#3fb950}
+  .event.gate.fail{background:#f85149}
+  .event.vault{background:#d29922}
+  .event.handoff{background:#a371f7}
+  .event-label{position:absolute;top:0;left:4px;font-size:10px;color:#0e1117;white-space:nowrap;overflow:hidden}
+  .legend{margin-top:24px;display:flex;gap:16px;flex-wrap:wrap;font-family:ui-monospace,monospace;font-size:11px;color:#8b949e}
+  .legend span{display:flex;align-items:center;gap:6px}
+  .legend i{display:inline-block;width:12px;height:12px;border-radius:2px}
+  .detail-panel{background:#1c2128;border:1px solid #30363d;border-radius:8px;padding:16px;font-family:ui-monospace,monospace;font-size:12px;display:none;margin-top:16px}
+  .detail-panel.show{display:block}
+  table{width:100%;border-collapse:collapse;margin-top:8px}
+  table th,table td{padding:6px 8px;border-bottom:1px solid #30363d;text-align:left;font-size:11px}
+  table th{color:#8b949e;text-transform:uppercase;font-size:9px;letter-spacing:0.05em}
+  footer{position:fixed;bottom:0;left:0;right:0;background:#161b22;border-top:1px solid #30363d;padding:8px 24px;font-size:11px;color:#8b949e;font-family:ui-monospace,monospace}
+</style>
+</head>
+<body>
+<header>
+  <h1>⚡ NEEWE Replay — ${escapeHtml(state.active_goal || 'session')}</h1>
+  <div class="meta">
+    <span><strong>Generated</strong>: ${new Date().toISOString()}</span>
+    <span><strong>Span</strong>: ${startTs} → ${endTs}</span>
+    <span><strong>Duration</strong>: ${formatDuration(durationSec)}</span>
+    <span><strong>Total events</strong>: ${events.length}</span>
+    <span><strong>Total cost</strong>: $${totalCost.toFixed(4)}</span>
+    <span><strong>Phase</strong>: ${state.phase || '?'}</span>
+    <span><strong>Mode</strong>: ${state.mode || '?'}</span>
+    <span><strong>Squad</strong>: ${state.active_squad || '—'}</span>
+  </div>
+</header>
+
+<main>
+  <div class="timeline">
+    <div class="axis">
+      ${axisLabels(startTs, endTs).map(l => `<span style="left:${l.pct}%">${l.label}</span>`).join('')}
+    </div>
+    ${rowFor('cost', 'Cost', events, startTs, endTs)}
+    ${rowFor('gate', 'Gates', events, startTs, endTs)}
+    ${rowFor('vault', 'Vault', events, startTs, endTs)}
+    ${rowFor('handoff', 'Handoffs', events, startTs, endTs)}
+    <div class="legend">
+      <span><i style="background:#58a6ff"></i> Cost (tool call)</span>
+      <span><i style="background:#3fb950"></i> Gate PASS</span>
+      <span><i style="background:#f85149"></i> Gate FAIL</span>
+      <span><i style="background:#d29922"></i> Vault log entry</span>
+      <span><i style="background:#a371f7"></i> Handoff snapshot</span>
+    </div>
+  </div>
+
+  <div id="detail" class="detail-panel"></div>
+
+  <div class="timeline">
+    <h2 style="font-size:12px;text-transform:uppercase;color:#8b949e;margin-bottom:12px">All Events</h2>
+    <table>
+      <thead><tr><th>Timestamp</th><th>Type</th><th>Title</th><th>Detail</th></tr></thead>
+      <tbody>
+        ${events.map(e => `<tr><td>${e.ts}</td><td style="color:${typeColor(e)}">${e.type}</td><td>${escapeHtml(e.title)}</td><td>${escapeHtml(e.detail || '')}</td></tr>`).join('')}
+      </tbody>
+    </table>
+  </div>
+</main>
+
+<footer>
+  NEEWE Replay v0.7.0 · <code>neewe-replay --since DATE --out PATH</code> for filtered/custom output · Open with any browser; no server required.
+</footer>
+
+<script>
+const events = ${JSON.stringify(events)};
+document.querySelectorAll('.event').forEach(el => {
+  el.addEventListener('click', () => {
+    const i = parseInt(el.dataset.idx);
+    const e = events[i];
+    const panel = document.getElementById('detail');
+    panel.classList.add('show');
+    panel.innerHTML = '<h3 style="font-size:13px;margin-bottom:8px">' + e.title + '</h3>' +
+      '<div style="color:#8b949e;font-size:11px;margin-bottom:8px">' + e.ts + ' · ' + e.type + '</div>' +
+      '<div>' + (e.detail || '(no detail)') + '</div>';
+  });
+});
+</script>
+</body></html>`;
+
+// ── Write ────────────────────────────────────────────────────────────────
+function pad2(n) { return String(n).padStart(2, '0'); }
+const now = new Date();
+const stamp = `${now.getUTCFullYear()}${pad2(now.getUTCMonth()+1)}${pad2(now.getUTCDate())}T${pad2(now.getUTCHours())}${pad2(now.getUTCMinutes())}${pad2(now.getUTCSeconds())}Z`;
+const outPath = outArg || path.join('.neewe', 'replays', `run-${stamp}.html`);
+fs.mkdirSync(path.dirname(outPath), { recursive: true });
+fs.writeFileSync(outPath, html);
+console.log(`[neewe-replay] wrote ${outPath} (${events.length} events, $${totalCost.toFixed(4)} total cost)`);
+console.log(`[neewe-replay] open with any browser: file://${path.resolve(outPath)}`);
+
+// ── Helpers ──────────────────────────────────────────────────────────────
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function formatDuration(sec) {
+  if (sec < 60) return `${Math.round(sec)}s`;
+  if (sec < 3600) return `${Math.round(sec/60)}m${Math.round(sec%60)}s`;
+  return `${Math.floor(sec/3600)}h${Math.round((sec%3600)/60)}m`;
+}
+function axisLabels(start, end) {
+  return [
+    { pct: 0, label: new Date(start).toISOString().slice(11, 19) },
+    { pct: 25, label: '' },
+    { pct: 50, label: '' },
+    { pct: 75, label: '' },
+    { pct: 100, label: new Date(end).toISOString().slice(11, 19) },
+  ];
+}
+function typeColor(e) {
+  if (e.type === 'cost') return '#58a6ff';
+  if (e.type === 'gate') return e.passed ? '#3fb950' : '#f85149';
+  if (e.type === 'vault') return '#d29922';
+  if (e.type === 'handoff') return '#a371f7';
+  return '#8b949e';
+}
+function rowFor(type, label, allEvents, startTs, endTs) {
+  const startMs = new Date(startTs).getTime();
+  const spanMs = Math.max(1, new Date(endTs).getTime() - startMs);
+  const filtered = allEvents
+    .map((e, idx) => ({ ...e, idx }))
+    .filter(e => e.type === type);
+  const bars = filtered.map(e => {
+    const pct = ((new Date(e.ts).getTime() - startMs) / spanMs) * 100;
+    const failClass = (type === 'gate' && !e.passed) ? ' fail' : '';
+    return `<div class="event ${type}${failClass}" data-idx="${e.idx}" style="left:${pct.toFixed(2)}%;width:4px" title="${escapeHtml(e.title)}: ${escapeHtml(e.detail || '')}"></div>`;
+  }).join('');
+  return `<div class="row"><div class="row-label">${label} (${filtered.length})</div><div class="row-track">${bars}</div></div>`;
+}

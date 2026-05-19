@@ -1,0 +1,307 @@
+#!/usr/bin/env bash
+# neewe-squad — EP-OPUS-5 Squad-as-Service CLI (Sprint 6.5)
+#
+# Manages cross-project squad pool at ~/.neewe/squads/<squad-id>/.
+# Squads are reusable team compositions tracked across projects with
+# lineage data (every run logged) so the Squad Composer can recommend
+# based on what worked elsewhere.
+#
+# Subcommands:
+#   neewe-squad save <name> [--from-state]    Save current state.json#active_squad as <name>
+#   neewe-squad list                          List available squads
+#   neewe-squad show <name>                   Show squad manifest + recent runs
+#   neewe-squad load <name>                   Apply squad to current project's state.json
+#   neewe-squad delete <name>                 Remove squad from pool (asks confirm)
+#   neewe-squad lineage <name>                Show all runs of this squad (JSONL)
+#   neewe-squad log-run <name> --outcome <pass|fail> [--cost <usd>] [--duration <sec>]
+#                                             Append a run record to lineage.jsonl
+#   neewe-squad help                          Print help
+#
+# Layout (per squad):
+#   ~/.neewe/squads/<name>/
+#     ├── manifest.json    composition + role assignments (immutable per save)
+#     ├── lineage.jsonl    one line per run (project, outcome, cost, duration)
+#     └── README.md        human-readable summary
+#
+# Zero npm deps. Bash + jq or python fallback.
+
+set -uo pipefail
+
+NEEWE_VERSION="0.7.0"
+SQUADS_DIR="${HOME}/.neewe/squads"
+STATE_FILE=".neewe/state.json"
+
+_have_jq() { command -v jq >/dev/null 2>&1; }
+_have_python() { command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1; }
+_py() {
+  if command -v python3 >/dev/null 2>&1; then python3 "$@"; else python "$@"; fi
+}
+
+sanitize_name() {
+  echo "$1" | tr -dc 'a-zA-Z0-9_-' | head -c 64
+}
+
+cmd_save() {
+  local name="${1:-}"
+  if [ -z "$name" ]; then
+    echo "[neewe-squad] ERROR: name required. Usage: neewe-squad save <name>" >&2
+    return 1
+  fi
+  name=$(sanitize_name "$name")
+  if [ ! -f "$STATE_FILE" ]; then
+    echo "[neewe-squad] ERROR: no state file in current dir. Run neewe init first." >&2
+    return 1
+  fi
+  local squad_dir="${SQUADS_DIR}/${name}"
+  mkdir -p "$squad_dir"
+  local now project_dir
+  now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  project_dir=$(pwd)
+  if _have_jq; then
+    jq -n --arg n "$name" --arg t "$now" --arg p "$project_dir" \
+       --argjson state "$(cat "$STATE_FILE")" \
+       '{
+          name: $n,
+          saved_at: $t,
+          saved_from: $p,
+          neewe_version: env.NEEWE_VERSION // "0.7.0",
+          composition: {
+            active_squad: $state.active_squad,
+            mode: $state.mode,
+            model_routing: $state.model_routing,
+            permission_mode: $state.permission_mode,
+            output_style: $state.output_style,
+            hook_profile: $state.hook_profile,
+            caveman_mode: $state.caveman_mode
+          },
+          schema: "neewe-squad-manifest-v1"
+        }' > "${squad_dir}/manifest.json"
+  elif _have_python; then
+    NEEWE_NAME="$name" NEEWE_AT="$now" NEEWE_FROM="$project_dir" NEEWE_VER="$NEEWE_VERSION" \
+    _py - "$STATE_FILE" "${squad_dir}/manifest.json" <<'PYEOF'
+import json, os, sys
+state = json.load(open(sys.argv[1]))
+out = {
+    "name": os.environ["NEEWE_NAME"],
+    "saved_at": os.environ["NEEWE_AT"],
+    "saved_from": os.environ["NEEWE_FROM"],
+    "neewe_version": os.environ["NEEWE_VER"],
+    "composition": {
+        "active_squad": state.get("active_squad"),
+        "mode": state.get("mode"),
+        "model_routing": state.get("model_routing"),
+        "permission_mode": state.get("permission_mode"),
+        "output_style": state.get("output_style"),
+        "hook_profile": state.get("hook_profile"),
+        "caveman_mode": state.get("caveman_mode"),
+    },
+    "schema": "neewe-squad-manifest-v1",
+}
+json.dump(out, open(sys.argv[2], "w"), indent=2)
+PYEOF
+  else
+    echo "[neewe-squad] ERROR: need jq or python to serialize" >&2; return 1
+  fi
+  # Init empty lineage if missing.
+  if [ ! -f "${squad_dir}/lineage.jsonl" ]; then
+    : > "${squad_dir}/lineage.jsonl"
+  fi
+  # README seed.
+  cat > "${squad_dir}/README.md" <<EOF
+# Squad: ${name}
+
+**Saved at:** ${now}
+**From project:** ${project_dir}
+
+## Composition
+See \`manifest.json\` for full composition snapshot.
+
+## Lineage
+\`lineage.jsonl\` is append-only — one line per run of this squad.
+
+## Use
+\`\`\`
+neewe-squad load ${name}     # apply to current project
+neewe-squad show ${name}     # inspect manifest + recent runs
+neewe-squad lineage ${name}  # full run history
+\`\`\`
+EOF
+  echo "[neewe-squad] saved → ${squad_dir}"
+}
+
+cmd_list() {
+  if [ ! -d "$SQUADS_DIR" ]; then
+    echo "[neewe-squad] no squads pool yet at ${SQUADS_DIR}"
+    return 0
+  fi
+  local count=0
+  for d in "$SQUADS_DIR"/*/; do
+    [ -d "$d" ] || continue
+    count=$((count + 1))
+    local name
+    name=$(basename "$d")
+    local runs="0"
+    if [ -f "${d}lineage.jsonl" ]; then
+      runs=$(wc -l < "${d}lineage.jsonl" | tr -d ' ')
+    fi
+    local saved="?"
+    if [ -f "${d}manifest.json" ]; then
+      if _have_jq; then
+        saved=$(jq -r '.saved_at // "?"' "${d}manifest.json")
+      fi
+    fi
+    printf '  %-30s  saved=%s  runs=%s\n' "$name" "$saved" "$runs"
+  done
+  if [ "$count" = "0" ]; then
+    echo "[neewe-squad] no squads in pool"
+  fi
+}
+
+cmd_show() {
+  local name="${1:-}"
+  if [ -z "$name" ]; then
+    echo "[neewe-squad] ERROR: name required" >&2; return 1
+  fi
+  name=$(sanitize_name "$name")
+  local mf="${SQUADS_DIR}/${name}/manifest.json"
+  if [ ! -f "$mf" ]; then
+    echo "[neewe-squad] ERROR: squad '${name}' not found at ${mf}" >&2; return 1
+  fi
+  if _have_jq; then jq . "$mf"; else cat "$mf"; fi
+  local ln="${SQUADS_DIR}/${name}/lineage.jsonl"
+  if [ -f "$ln" ]; then
+    echo ""
+    echo "--- Lineage (last 5 runs) ---"
+    tail -5 "$ln" 2>/dev/null
+    echo "Total runs: $(wc -l < "$ln" | tr -d ' ')"
+  fi
+}
+
+cmd_load() {
+  local name="${1:-}"
+  if [ -z "$name" ]; then echo "[neewe-squad] ERROR: name required" >&2; return 1; fi
+  name=$(sanitize_name "$name")
+  local mf="${SQUADS_DIR}/${name}/manifest.json"
+  if [ ! -f "$mf" ]; then
+    echo "[neewe-squad] ERROR: squad '${name}' not found" >&2; return 1
+  fi
+  if [ ! -f "$STATE_FILE" ]; then
+    echo "[neewe-squad] ERROR: no state file. Run neewe init first." >&2; return 1
+  fi
+  if _have_jq; then
+    jq --slurpfile sq "$mf" \
+      '.active_squad = $sq[0].name
+       | .mode = ($sq[0].composition.mode // .mode)
+       | .model_routing = ($sq[0].composition.model_routing // .model_routing)' \
+      "$STATE_FILE" > "${STATE_FILE}.tmp" && mv "${STATE_FILE}.tmp" "$STATE_FILE"
+  elif _have_python; then
+    NEEWE_MF="$mf" _py - "$STATE_FILE" <<'PYEOF'
+import json, os, sys
+state = json.load(open(sys.argv[1]))
+sq = json.load(open(os.environ["NEEWE_MF"]))
+state["active_squad"] = sq["name"]
+comp = sq.get("composition", {})
+if comp.get("mode"): state["mode"] = comp["mode"]
+if comp.get("model_routing"): state["model_routing"] = comp["model_routing"]
+json.dump(state, open(sys.argv[1] + ".tmp", "w"), indent=2)
+PYEOF
+    mv "${STATE_FILE}.tmp" "$STATE_FILE"
+  fi
+  echo "[neewe-squad] loaded squad '${name}' into ${STATE_FILE}"
+}
+
+cmd_log_run() {
+  local name="${1:-}"
+  shift || true
+  if [ -z "$name" ]; then echo "[neewe-squad] ERROR: name required" >&2; return 1; fi
+  name=$(sanitize_name "$name")
+  local ln="${SQUADS_DIR}/${name}/lineage.jsonl"
+  if [ ! -f "$ln" ]; then
+    echo "[neewe-squad] ERROR: squad '${name}' not found" >&2; return 1
+  fi
+  local outcome="" cost="" duration="" project=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --outcome) outcome="${2:-}"; shift 2 ;;
+      --cost) cost="${2:-}"; shift 2 ;;
+      --duration) duration="${2:-}"; shift 2 ;;
+      --project) project="${2:-}"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  if [ -z "$project" ]; then project=$(pwd); fi
+  local now
+  now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  printf '{"ts":"%s","outcome":"%s","cost_usd":%s,"duration_sec":%s,"project":"%s"}\n' \
+    "$now" "${outcome:-unknown}" "${cost:-0}" "${duration:-0}" "${project}" >> "$ln"
+  echo "[neewe-squad] logged run for '${name}'"
+}
+
+cmd_delete() {
+  local name="${1:-}"
+  if [ -z "$name" ]; then echo "[neewe-squad] ERROR: name required" >&2; return 1; fi
+  name=$(sanitize_name "$name")
+  local sd="${SQUADS_DIR}/${name}"
+  if [ ! -d "$sd" ]; then
+    echo "[neewe-squad] ERROR: squad '${name}' not found" >&2; return 1
+  fi
+  read -p "[neewe-squad] DELETE squad '${name}' permanently? (y/N) " confirm
+  if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+    echo "[neewe-squad] aborted"; return 0
+  fi
+  rm -rf "$sd"
+  echo "[neewe-squad] deleted ${sd}"
+}
+
+cmd_lineage() {
+  local name="${1:-}"
+  if [ -z "$name" ]; then echo "[neewe-squad] ERROR: name required" >&2; return 1; fi
+  name=$(sanitize_name "$name")
+  local ln="${SQUADS_DIR}/${name}/lineage.jsonl"
+  if [ ! -f "$ln" ]; then
+    echo "[neewe-squad] no lineage for '${name}'"; return 0
+  fi
+  cat "$ln"
+}
+
+cmd_help() {
+  cat <<'EOF'
+neewe-squad — Cross-project squad pool (EP-OPUS-5)
+
+USAGE:
+  neewe-squad <command> [args]
+
+COMMANDS:
+  save <name>                  Save current state.json#active_squad as <name>
+  list                         List available squads (with run count + last save date)
+  show <name>                  Print squad manifest + last 5 lineage entries
+  load <name>                  Apply squad to current project's state.json
+  delete <name>                Remove squad from pool (asks confirm)
+  lineage <name>               Print full lineage JSONL for <name>
+  log-run <name> --outcome <pass|fail> [--cost N] [--duration N] [--project PATH]
+                               Append run record (typically called automatically by
+                               governance-release or Phase Orchestrator)
+  help                         Print this
+
+POOL: ${HOME}/.neewe/squads/<name>/{manifest.json, lineage.jsonl, README.md}
+
+NEEWE Squad Composer (in neewe-core) consults this pool when recommending
+squads for new projects — past success informs future composition.
+EOF
+}
+
+case "${1:-help}" in
+  save)        shift; cmd_save "$@" ;;
+  list)        cmd_list ;;
+  show)        shift; cmd_show "$@" ;;
+  load)        shift; cmd_load "$@" ;;
+  delete)      shift; cmd_delete "$@" ;;
+  lineage)     shift; cmd_lineage "$@" ;;
+  log-run)     shift; cmd_log_run "$@" ;;
+  help|-h|--help) cmd_help ;;
+  *)
+    echo "[neewe-squad] unknown command: $1" >&2
+    cmd_help
+    exit 1
+    ;;
+esac
