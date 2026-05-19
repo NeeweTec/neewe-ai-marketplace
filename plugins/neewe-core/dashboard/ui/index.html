@@ -4,88 +4,165 @@
 <meta charset="UTF-8">
 <title>NEEWE Dashboard</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="NEEWE Framework — live runtime dashboard.">
 <link rel="stylesheet" href="/style.css">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%23F5A623'/%3E%3Cpath d='M13 4l-7 9h4v7l7-9h-4z' fill='%23070A'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
 </head>
 <body>
-<header>
-  <div class="brand">⚡ NEEWE Dashboard</div>
-  <div class="conn" id="conn-status">connecting…</div>
+
+<header role="banner">
+  <div class="brand">
+    <div class="brand-logo" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+        <path d="M13 4l-7 9h4v7l7-9h-4z" fill="currentColor"/>
+      </svg>
+    </div>
+    <span>NEEWE</span>
+    <span class="brand-tag">Opus plans · Sonnet executes</span>
+  </div>
+  <nav class="header-meta" aria-label="Session status">
+    <span class="header-pill" id="locale-pill" aria-live="polite">
+      <span class="dot"></span><span id="locale-text">en-US</span>
+    </span>
+    <span class="header-pill" id="conn-status" aria-live="polite">
+      <span class="dot"></span><span id="conn-text">connecting…</span>
+    </span>
+  </nav>
 </header>
 
-<main>
-  <!-- Phase + Mode + Goal -->
-  <section class="panel" id="panel-state">
-    <h2>Runtime State</h2>
+<!-- 7-step stage tracker (mirrors TUI stepper) -->
+<section class="stage-tracker" aria-label="Project stages">
+  <ol class="stages" id="stages" role="list">
+    <li class="stage" data-i="0"><span class="stage-dot">1</span><span class="stage-label" data-key="stage.1.label">Initial</span></li>
+    <li class="stage" data-i="1"><span class="stage-dot">2</span><span class="stage-label" data-key="stage.2.label">Ground</span></li>
+    <li class="stage" data-i="2"><span class="stage-dot">3</span><span class="stage-label" data-key="stage.3.label">Plan</span></li>
+    <li class="stage" data-i="3"><span class="stage-dot">4</span><span class="stage-label" data-key="stage.4.label">Dispatch</span></li>
+    <li class="stage" data-i="4"><span class="stage-dot">5</span><span class="stage-label" data-key="stage.5.label">Orchestrate</span></li>
+    <li class="stage" data-i="5"><span class="stage-dot">6</span><span class="stage-label" data-key="stage.6.label">Code</span></li>
+    <li class="stage" data-i="6"><span class="stage-dot">7</span><span class="stage-label" data-key="stage.7.label">Finish</span></li>
+  </ol>
+</section>
+
+<main role="main">
+
+  <!-- State + Routing combined -->
+  <section class="panel" id="panel-state" aria-labelledby="title-state">
+    <div class="panel-header">
+      <h2 class="panel-title" id="title-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        <span data-key="state.phase">Runtime</span>
+      </h2>
+    </div>
     <div class="kv-grid">
-      <div class="kv"><span class="k">Phase</span><span class="v" id="state-phase">—</span></div>
-      <div class="kv"><span class="k">Mode</span><span class="v" id="state-mode">—</span></div>
-      <div class="kv"><span class="k">Active goal</span><span class="v" id="state-goal">—</span></div>
-      <div class="kv"><span class="k">Active squad</span><span class="v" id="state-squad">—</span></div>
-      <div class="kv"><span class="k">Permission mode</span><span class="v" id="state-perm">—</span></div>
-      <div class="kv"><span class="k">Output style</span><span class="v" id="state-style">—</span></div>
-      <div class="kv"><span class="k">Hook profile</span><span class="v" id="state-hooks">—</span></div>
-      <div class="kv"><span class="k">Caveman</span><span class="v" id="state-caveman">—</span></div>
+      <div class="kv"><span class="k" data-key="state.phase">Stage</span><span class="v" id="state-phase">—</span></div>
+      <div class="kv"><span class="k" data-key="state.mode">Mode</span><span class="v" id="state-mode">—</span></div>
+      <div class="kv"><span class="k" data-key="state.goal">Active goal</span><span class="v" id="state-goal">—</span></div>
+      <div class="kv"><span class="k" data-key="state.squad">Active squad</span><span class="v" id="state-squad">—</span></div>
+      <div class="kv"><span class="k" data-key="state.permission">Permission</span><span class="v" id="state-perm">—</span></div>
+      <div class="kv"><span class="k" data-key="state.style">Style</span><span class="v" id="state-style">—</span></div>
+      <div class="kv"><span class="k" data-key="state.routing.main">Main</span><span class="v" id="route-main">—</span></div>
+      <div class="kv"><span class="k" data-key="state.routing.sub">Subagents</span><span class="v" id="route-sub">—</span></div>
     </div>
   </section>
 
-  <!-- Cost Budget -->
-  <section class="panel" id="panel-cost">
-    <h2>Cost Budget <span class="hint">(approximate; reconcile with <code>/usage</code>)</span></h2>
-    <div class="cost-summary">
-      <div class="cost-big" id="cost-big">$0.00 / $0.00</div>
-      <div class="cost-util">Utilization: <span id="cost-util-val">0%</span></div>
-      <div class="cost-bar"><div class="cost-bar-fill" id="cost-bar-fill" style="width:0%"></div></div>
+  <!-- Cost panel -->
+  <section class="panel" id="panel-cost" aria-labelledby="title-cost">
+    <div class="panel-header">
+      <h2 class="panel-title" id="title-cost">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        <span data-key="cost.label">Cost</span>
+      </h2>
+      <span class="panel-hint">approximate · reconcile with <code>/usage</code></span>
     </div>
+
+    <div class="cost-summary">
+      <div class="cost-headline">
+        <span id="cost-spent">$0.00</span><span class="sep">/</span><span class="cap-val" id="cost-cap">$0.00</span>
+      </div>
+      <div>
+        <div class="cost-util" id="cost-util"><span data-key="cost.utilization">Utilization</span>: <span id="cost-util-val">0%</span></div>
+        <div class="cost-bar"><div class="cost-bar-fill" id="cost-bar-fill" style="width:0%"></div></div>
+      </div>
+    </div>
+
+    <div class="cost-sparkline-wrap" aria-label="Cost over time">
+      <canvas id="cost-sparkline" class="cost-sparkline" width="800" height="80"></canvas>
+    </div>
+
     <div class="cost-breakdown">
       <div class="cost-table">
         <h3>Top spend by tool</h3>
-        <table id="cost-by-tool"><thead><tr><th>Tool</th><th>USD</th></tr></thead><tbody></tbody></table>
+        <table id="cost-by-tool"><tbody></tbody></table>
       </div>
       <div class="cost-table">
         <h3>Top spend by model</h3>
-        <table id="cost-by-model"><thead><tr><th>Model</th><th>USD</th></tr></thead><tbody></tbody></table>
+        <table id="cost-by-model"><tbody></tbody></table>
       </div>
     </div>
   </section>
 
-  <!-- Model Routing -->
-  <section class="panel" id="panel-routing">
-    <h2>Model Routing</h2>
-    <div class="kv-grid">
-      <div class="kv"><span class="k">Main</span><span class="v" id="route-main">—</span></div>
-      <div class="kv"><span class="k">Subagents</span><span class="v" id="route-sub">—</span></div>
-      <div class="kv"><span class="k">Background</span><span class="v" id="route-bg">—</span></div>
-      <div class="kv"><span class="k">Effort</span><span class="v" id="route-effort">—</span></div>
+  <!-- Gates panel (click to drilldown) -->
+  <section class="panel" id="panel-gates" aria-labelledby="title-gates">
+    <div class="panel-header">
+      <h2 class="panel-title" id="title-gates">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>
+        <span data-key="gate.label">Governance review</span>
+      </h2>
+      <span class="panel-hint">latest per stage</span>
+    </div>
+    <div class="gates-list" id="gates-list" role="list">
+      <em style="color:var(--text-muted);font-style:italic">no gate runs yet</em>
     </div>
   </section>
 
-  <!-- Gates -->
-  <section class="panel" id="panel-gates">
-    <h2>Governance Gates (latest per phase)</h2>
-    <div id="gates-content"><em>no gate runs yet</em></div>
+  <!-- Events panel -->
+  <section class="panel" id="panel-events" aria-labelledby="title-events">
+    <div class="panel-header">
+      <h2 class="panel-title" id="title-events">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18M3 12h18M3 17h12"/></svg>
+        <span>Events</span>
+      </h2>
+      <span class="panel-hint"><code>vault/log.md</code> tail</span>
+    </div>
+    <div class="events-controls">
+      <input type="text" id="event-filter" placeholder="filter events…" aria-label="Filter events">
+    </div>
+    <ul id="event-list" aria-live="polite"></ul>
   </section>
 
-  <!-- Event Log -->
-  <section class="panel" id="panel-events">
-    <h2>Event Log <span class="hint">(vault/log.md tail)</span></h2>
-    <ul id="event-list"><li><em>no events yet</em></li></ul>
-  </section>
-
-  <!-- Settings (PATCH) -->
-  <section class="panel" id="panel-settings">
-    <h2>Settings (safe-to-edit) <span class="hint">(.claude/settings.local.json)</span></h2>
+  <!-- Settings panel -->
+  <section class="panel" id="panel-settings" aria-labelledby="title-settings">
+    <div class="panel-header">
+      <h2 class="panel-title" id="title-settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.36.16.66.42.88.74"/></svg>
+        <span>Settings</span>
+      </h2>
+      <span class="panel-hint"><code>.claude/settings.local.json</code></span>
+    </div>
     <form id="settings-form">
-      <div id="settings-fields"><em>loading…</em></div>
-      <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
-        <button type="submit" id="settings-save" style="background:#238636;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font:inherit">Save</button>
-        <span id="settings-status" style="color:var(--text-dim);font-size:12px"></span>
+      <div id="settings-fields"><em style="color:var(--text-muted)">loading…</em></div>
+      <div class="settings-actions">
+        <button type="submit" class="primary" id="settings-save">Save</button>
+        <span id="settings-status" class="settings-status"></span>
       </div>
     </form>
   </section>
+
 </main>
 
+<!-- Drilldown side panel -->
+<aside class="drilldown" id="drilldown" role="dialog" aria-modal="true" aria-labelledby="drilldown-title">
+  <button class="drilldown-close" id="drilldown-close" aria-label="Close">Esc</button>
+  <h2 id="drilldown-title">Gate detail</h2>
+  <div id="drilldown-body"></div>
+</aside>
+
 <footer>
-  <div>NEEWE Framework · <code>neewe show</code> for raw state · <code>neewe cost-report</code> for full cost log</div>
+  <div>NEEWE Framework v1.0.0</div>
+  <div><code>neewe show</code> · <code>neewe cost-report</code> · <code>neewe-replay</code></div>
 </footer>
 
 <script src="/app.js"></script>

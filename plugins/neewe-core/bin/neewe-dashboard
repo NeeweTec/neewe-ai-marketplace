@@ -94,9 +94,16 @@ function getCostSummary() {
   const cap = state?.cost_budget?.cap_usd ?? 0;
   const spent = state?.cost_budget?.spent_usd ?? 0;
   const log = readTextSafe('.neewe/.cost-log');
-  const entries = log.trim().split('\n').filter(Boolean).slice(-50).map(line => {
+  const allEntries = log.trim().split('\n').filter(Boolean).map(line => {
     try { return JSON.parse(line); } catch (_) { return null; }
   }).filter(Boolean);
+  const entries = allEntries.slice(-50);
+  // Build cumulative history for the sparkline (up to last 100 points, bucketed).
+  let cumulative = 0;
+  const history = allEntries.slice(-100).map((e) => {
+    cumulative += Number(e.amount_usd || 0);
+    return { ts: e.ts || null, cumulative_usd: +cumulative.toFixed(4) };
+  });
   return {
     cap_usd: cap,
     spent_usd: spent,
@@ -104,7 +111,36 @@ function getCostSummary() {
     recent: entries.slice(-10),
     by_tool: aggregateBy(entries, 'tool'),
     by_model: aggregateBy(entries, 'model'),
+    history,
   };
+}
+
+// Map internal phase → 7-step user-facing stage index (matches glossary.md)
+const STAGE_INDEX = {
+  init: 0, bootstrap: 0,
+  discovery: 1,
+  planning: 2,
+  dispatch: 3, dispatching: 3,
+  orchestration: 4, orchestrating: 4,
+  execution: 5,
+  verification: 6, review: 6, release: 6, retro: 6
+};
+
+function getStage() {
+  const s = getState();
+  const phase = String((s.phase || '')).toLowerCase();
+  const idx = STAGE_INDEX[phase] ?? 0;
+  return { phase, index: idx, total: 7 };
+}
+
+// i18n strings + detected locale (resolved server-side once per request)
+function getI18n() {
+  const stringsPath = path.join(__dirname, '..', 'i18n', 'strings.json');
+  let strings = {};
+  try { strings = JSON.parse(fs.readFileSync(stringsPath, 'utf8')); } catch {}
+  const state = getState();
+  const locale = (state.locale && state.locale.user_language) || 'en-US';
+  return { locale, strings };
 }
 
 function aggregateBy(entries, key) {
@@ -236,6 +272,8 @@ function startServer(port, token, uiDir) {
       if (url.pathname === '/api/state') return sendJson(res, 200, getState());
       if (url.pathname === '/api/cost') return sendJson(res, 200, getCostSummary());
       if (url.pathname === '/api/gates') return sendJson(res, 200, getGates());
+      if (url.pathname === '/api/stage') return sendJson(res, 200, getStage());
+      if (url.pathname === '/api/i18n') return sendJson(res, 200, getI18n());
       if (url.pathname === '/api/events-snapshot') return sendJson(res, 200, { events: tailEvents() });
       if (url.pathname === '/api/settings/safe') {
         if (req.method === 'GET') return sendJson(res, 200, getSafeSettings());
