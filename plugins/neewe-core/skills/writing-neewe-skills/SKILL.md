@@ -2,6 +2,7 @@
 name: writing-neewe-skills
 description: Use when authoring a new NEEWE skill, refactoring an existing one, or reviewing a skill PR. Defines the Iron Law (no skill without a failing test), the TDD-for-prose workflow, the persuasion-principle matrix by skill type, the Description=WHEN-never-WHAT rule, NEEWE XML markers, and token budgets. Required reading before any skill modification.
 license: MIT
+token_budget: reference
 ---
 
 # Writing NEEWE Skills
