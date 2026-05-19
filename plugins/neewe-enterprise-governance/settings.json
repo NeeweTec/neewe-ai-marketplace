@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+
+  "strictKnownMarketplaces": true,
+  "allowManagedHooksOnly": true,
+  "allowManagedMcpServersOnly": true,
+  "allowManagedPermissionRulesOnly": true,
+  "disableBypassPermissionsMode": "disable",
+
+  "permissions": {
+    "disableAutoMode": "disable",
+    "deny": [
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(--dangerously-skip-permissions *)",
+      "Bash(rm -rf /*)",
+      "Bash(rm -rf ~*)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./**/.env)",
+      "Read(./**/.env.*)",
+      "Read(./secrets/**)",
+      "Read(./**/credentials.json)",
+      "Read(./**/id_rsa)",
+      "Read(./**/*.pem)",
+      "Edit(./.git/**)",
+      "Edit(./.husky/**)"
+    ]
+  },
+
+  "fastModePerSessionOptIn": true,
+
+  "env": {
+    "NEEWE_HOOK_PROFILE": "strict",
+    "NEEWE_PROVENANCE_REQUIRED": "1",
+    "NEEWE_AUDIT_LOG": ".neewe/audit.log"
+  }
+}

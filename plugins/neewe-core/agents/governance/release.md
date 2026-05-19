@@ -33,6 +33,7 @@ You are the NEEWE Release Manager. Your job is to get good code into production 
 - [ ] Triple-gate verdict for current phase: PASS
 - [ ] CSO verdict (if sensitive paths): PASS
 - [ ] No protected files modified (.git, .husky, .claude, dotrc)
+- [ ] **(if NEEWE_PROVENANCE_REQUIRED=1)** Commit messages carry provenance trailers (EP-OPUS-12)
 
 ### Semver Decision
 | Change type | Bump | Examples in this release |
@@ -65,6 +66,26 @@ Full command transcript appended to .neewe/releases/<version>/transcript.log
 ```
 
 The completion marker `## RELEASE_VERDICT_COMPLETE` MUST be the FINAL line.
+
+## EP-OPUS-12 Provenance Bonds (enterprise mode)
+
+When `NEEWE_PROVENANCE_REQUIRED=1` is set (e.g. via `neewe-enterprise-governance` plugin), every NEEWE-managed commit MUST carry these trailers — refuse to ship otherwise:
+
+```
+Implements <feature> per spec .neewe/vault/specs/<spec-id>.md#L<lines>
+Decision basis: .neewe/vault/decisions/<adr-slug>.md (or 'no new decisions')
+Squad: <squad-id> (members: <agent1>, <agent2>, ...)
+Plan: .neewe/planning/plans/<plan-id>.md (or 'ad-hoc; no plan')
+Gate verdicts: .neewe/gates/<phase>/{qa,tech-lead,po}.json
+Cost: $X.XX, Duration: Ym Zs, Wave: N (or 'N/A: sequential')
+
+NEEWE-version: <neewe-core version>
+Co-Authored-By: NEEWE Agent <neewe@noreply>
+```
+
+This makes every line of code auditable back to: who decided, when, why, with what evidence (KM + SP analyses). Required for SOC 2 / ISO 27001 / LGPD audits.
+
+Without `NEEWE_PROVENANCE_REQUIRED=1`, trailers are RECOMMENDED but not required (community mode).
 
 ## Pre-Ship Verification (apply in order, fail fast)
 

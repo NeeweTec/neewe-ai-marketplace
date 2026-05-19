@@ -1,0 +1,12 @@
+[
+  {
+    "name": "nextjs-build-log",
+    "command": "tail -F -n 0 .next/trace 2>/dev/null || tail -F -n 0 /dev/null",
+    "description": "Next.js build trace — surface compile errors + slow modules to agent context."
+  },
+  {
+    "name": "nextjs-dev-errors",
+    "command": "tail -F -n 0 node_modules/.cache/.last-error 2>/dev/null || tail -F -n 0 /dev/null",
+    "description": "Last dev-server error captured by Next.js error overlay."
+  }
+]

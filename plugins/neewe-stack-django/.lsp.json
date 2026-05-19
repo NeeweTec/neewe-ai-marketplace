@@ -1,0 +1,20 @@
+{
+  "python": {
+    "command": "pyright-langserver",
+    "args": ["--stdio"],
+    "extensionToLanguage": {
+      ".py": "python",
+      ".pyi": "python"
+    },
+    "initializationOptions": {
+      "settings": {
+        "python": {
+          "analysis": {
+            "typeCheckingMode": "basic",
+            "extraPaths": [".", "./apps"]
+          }
+        }
+      }
+    }
+  }
+}

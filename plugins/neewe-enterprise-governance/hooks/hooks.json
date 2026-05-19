@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-hooks.json",
+  "hooks": {
+    "ConfigChange": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/audit-config-change.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/audit-permission-request.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

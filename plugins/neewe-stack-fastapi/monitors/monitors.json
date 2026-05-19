@@ -1,0 +1,12 @@
+[
+  {
+    "name": "fastapi-dev-server",
+    "command": "tail -F -n 0 .uvicorn.log 2>/dev/null || tail -F -n 0 /dev/null",
+    "description": "uvicorn dev server log — surface 4xx/5xx and async errors to agent context."
+  },
+  {
+    "name": "pytest-last-failure",
+    "command": "tail -F -n 0 .pytest_cache/v/cache/lastfailed 2>/dev/null || tail -F -n 0 /dev/null",
+    "description": "pytest lastfailed cache — agent sees which tests broke in the last run."
+  }
+]

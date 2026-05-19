@@ -1,0 +1,7 @@
+[
+  {
+    "name": "django-runserver",
+    "command": "tail -F -n 0 .runserver.log 2>/dev/null || tail -F -n 0 /dev/null",
+    "description": "Django runserver log — surface 4xx/5xx and uncaught exceptions to agent context."
+  }
+]
