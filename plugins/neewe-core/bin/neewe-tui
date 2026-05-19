@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# neewe-tui — launcher for the Ink TUI.
+# On first run, installs deps inside the plugin's tui/ directory (offline-friendly:
+# the user only pays this cost once per plugin version).
+
+set -euo pipefail
+
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
+if [ -z "$PLUGIN_ROOT" ]; then
+  HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  PLUGIN_ROOT="$(cd "${HERE}/.." && pwd)"
+fi
+
+TUI_DIR="${PLUGIN_ROOT}/tui"
+if [ ! -d "$TUI_DIR" ]; then
+  echo "neewe-tui: tui directory missing at $TUI_DIR" >&2
+  exit 1
+fi
+
+# Require Node 18+
+if ! command -v node >/dev/null 2>&1; then
+  echo "neewe-tui: node not found in PATH. NEEWE TUI needs Node 18+." >&2
+  exit 1
+fi
+
+NODE_MAJOR=$(node -e "console.log(process.versions.node.split('.')[0])" 2>/dev/null || echo 0)
+if [ "${NODE_MAJOR}" -lt 18 ]; then
+  echo "neewe-tui: node 18+ required (have $(node -v))" >&2
+  exit 1
+fi
+
+# Install deps on first run (or after version bump). We check for ink/node_modules.
+if [ ! -d "${TUI_DIR}/node_modules/ink" ]; then
+  echo "neewe-tui: installing TUI dependencies (one-time, ~15s)…" >&2
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "neewe-tui: npm not found. Install Node.js (which includes npm) and re-run." >&2
+    exit 1
+  fi
+  (cd "$TUI_DIR" && npm install --omit=dev --no-audit --no-fund --loglevel=error) || {
+    echo "neewe-tui: npm install failed inside ${TUI_DIR}" >&2
+    exit 1
+  }
+fi
+
+exec node "${TUI_DIR}/index.js" "$@"

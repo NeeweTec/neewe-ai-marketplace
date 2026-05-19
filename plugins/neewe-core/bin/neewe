@@ -591,7 +591,19 @@ EOF
 # Dispatcher
 # ────────────────────────────────────────────────────────────────────────────
 
-case "${1:-help}" in
+# No-arg invocation → open the TUI (v0.9.0 default front door).
+# Scripts continue to work for automation: any subcommand routes through the dispatcher below.
+if [ $# -eq 0 ]; then
+  TUI_BIN="$(dirname "${BASH_SOURCE[0]}")/neewe-tui"
+  if [ -x "$TUI_BIN" ] || [ -f "$TUI_BIN" ]; then
+    exec bash "$TUI_BIN"
+  fi
+  # TUI launcher missing → fall back to help so the CLI never silent-fails.
+  cmd_help
+  exit 0
+fi
+
+case "$1" in
   init)        cmd_init ;;
   show)        cmd_show ;;
   set-phase)   shift; cmd_set_phase "${1:-}" ;;
@@ -601,6 +613,7 @@ case "${1:-help}" in
   add-cost)    shift; cmd_add_cost "$@" ;;
   cost-report) cmd_cost_report ;;
   l4-init)     cmd_l4_init ;;
+  tui)         exec bash "$(dirname "${BASH_SOURCE[0]}")/neewe-tui" ;;
   help|-h|--help) cmd_help ;;
   *)
     echo "[neewe] unknown command: $1" >&2
