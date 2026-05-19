@@ -9,13 +9,11 @@
   "homepage": "https://github.com/NeeweTec/neewe-ai-marketplace",
   "repository": "https://github.com/NeeweTec/neewe-ai-marketplace",
   "version": "0.1.0",
-  "metadata": {
-    "pluginRoot": "./plugins"
-  },
   "plugins": [
     {
       "name": "neewe-core",
-      "source": "./neewe-core",
+      "source": "./plugins/neewe-core",
+      "version": "0.1.0",
       "category": "framework",
       "description": "NEEWE umbrella plugin — skills, agents, hooks, MCP, governance trio, MNEME memory, Goal Mode, Dashboard",
       "keywords": ["agent", "governance", "framework", "squad", "goal-mode", "opus-plan-sonnet-execute"]
