@@ -70,6 +70,20 @@ with open('${file}.tmp', 'w') as f: json.dump(d, f, indent=2)
   fi
 }
 
+json_mutate() {
+  # json_mutate <file> <jq-expression>
+  # Apply an arbitrary jq mutation (or python equivalent) to the file atomically.
+  local file="$1" jq_expr="$2" py_code="$3"
+  if _have_jq; then
+    jq "$jq_expr" "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
+  elif _have_python; then
+    _py -c "$py_code" && mv "${file}.tmp" "$file"
+  else
+    echo "ERROR: need jq or python to mutate JSON" >&2
+    return 1
+  fi
+}
+
 # ────────────────────────────────────────────────────────────────────────────
 # Lock helpers (atomic mkdir-based — POSIX-portable + works on Git Bash)
 # ────────────────────────────────────────────────────────────────────────────
@@ -189,6 +203,192 @@ cmd_get() {
   json_get "$STATE_FILE" "$field"
 }
 
+cmd_goal() {
+  # neewe goal "<description>" [--budget <usd>]
+  local description="${1:-}"
+  shift || true
+  local budget=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --budget) budget="${2:-}"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  if [ -z "$description" ]; then
+    echo "[neewe] ERROR: missing goal description. Usage: neewe goal \"<text>\" [--budget <usd>]" >&2
+    return 1
+  fi
+  if [ ! -f "$STATE_FILE" ]; then
+    echo "[neewe] no state file. Run: neewe init" >&2
+    return 1
+  fi
+  acquire_lock
+  local now
+  now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  if _have_jq; then
+    if [ -n "$budget" ]; then
+      jq --arg g "$description" --arg t "$now" --argjson b "$budget" \
+         '.active_goal = $g | .goal_started_at = $t | .cost_budget.cap_usd = $b | .cost_budget.spent_usd = 0' \
+         "$STATE_FILE" > "${STATE_FILE}.tmp" && mv "${STATE_FILE}.tmp" "$STATE_FILE"
+    else
+      jq --arg g "$description" --arg t "$now" \
+         '.active_goal = $g | .goal_started_at = $t | .cost_budget.spent_usd = 0' \
+         "$STATE_FILE" > "${STATE_FILE}.tmp" && mv "${STATE_FILE}.tmp" "$STATE_FILE"
+    fi
+  elif _have_python; then
+    _py - "$STATE_FILE" "$description" "$now" "$budget" <<'PYEOF'
+import json, sys
+with open(sys.argv[1]) as f: d = json.load(f)
+d['active_goal'] = sys.argv[2]
+d['goal_started_at'] = sys.argv[3]
+if len(sys.argv) > 4 and sys.argv[4]:
+    d.setdefault('cost_budget', {})['cap_usd'] = float(sys.argv[4])
+d.setdefault('cost_budget', {})['spent_usd'] = 0.0
+with open(sys.argv[1] + '.tmp', 'w') as f: json.dump(d, f, indent=2)
+PYEOF
+    mv "${STATE_FILE}.tmp" "$STATE_FILE"
+  else
+    echo "ERROR: need jq or python" >&2; return 1
+  fi
+  local cap
+  cap=$(json_get "$STATE_FILE" "cost_budget.cap_usd")
+  echo "[neewe] goal → \"$description\" (budget cap: \$$cap)"
+}
+
+cmd_mode() {
+  # neewe mode <thrift|balanced|quality>
+  local mode="${1:-}"
+  case "$mode" in
+    thrift|balanced|quality) ;;
+    "")
+      echo "[neewe] ERROR: missing mode. Usage: neewe mode <thrift|balanced|quality>" >&2
+      return 1
+      ;;
+    *)
+      echo "[neewe] ERROR: invalid mode '$mode'. Valid: thrift | balanced | quality" >&2
+      return 1
+      ;;
+  esac
+  if [ ! -f "$STATE_FILE" ]; then
+    echo "[neewe] no state file. Run: neewe init" >&2
+    return 1
+  fi
+  # Cascade mode → model_routing / caveman / hook_profile / output_style / effort
+  local main_model subagent_model bg_model caveman_mode hook_profile output_style effort
+  case "$mode" in
+    thrift)
+      main_model="sonnet"; subagent_model="sonnet"; bg_model="haiku"
+      caveman_mode="full"; hook_profile="minimal"; output_style="NEEWE Startup"; effort="low"
+      ;;
+    balanced)
+      main_model="opusplan"; subagent_model="sonnet"; bg_model="haiku"
+      caveman_mode="full"; hook_profile="standard"; output_style="NEEWE Startup"; effort="high"
+      ;;
+    quality)
+      main_model="opus[1m]"; subagent_model="opus"; bg_model="haiku"
+      caveman_mode="off"; hook_profile="strict"; output_style="Explanatory"; effort="xhigh"
+      ;;
+  esac
+  acquire_lock
+  if _have_jq; then
+    jq --arg m "$mode" --arg main "$main_model" --arg sub "$subagent_model" --arg bg "$bg_model" \
+       --arg cm "$caveman_mode" --arg hp "$hook_profile" --arg os "$output_style" --arg ef "$effort" \
+       '.mode = $m
+        | .model_routing.main = $main
+        | .model_routing.subagents = $sub
+        | .model_routing.background = $bg
+        | .caveman_mode = $cm
+        | .hook_profile = $hp
+        | .output_style = $os
+        | .effort = $ef' \
+       "$STATE_FILE" > "${STATE_FILE}.tmp" && mv "${STATE_FILE}.tmp" "$STATE_FILE"
+  elif _have_python; then
+    _py - "$STATE_FILE" "$mode" "$main_model" "$subagent_model" "$bg_model" "$caveman_mode" "$hook_profile" "$output_style" "$effort" <<'PYEOF'
+import json, sys
+f, mode, main, sub, bg, cm, hp, os_style, ef = sys.argv[1], *sys.argv[2:10]
+with open(f) as fh: d = json.load(fh)
+d['mode'] = mode
+d.setdefault('model_routing', {}).update({'main': main, 'subagents': sub, 'background': bg})
+d['caveman_mode'] = cm
+d['hook_profile'] = hp
+d['output_style'] = os_style
+d['effort'] = ef
+with open(f + '.tmp', 'w') as fh: json.dump(d, fh, indent=2)
+PYEOF
+    mv "${STATE_FILE}.tmp" "$STATE_FILE"
+  else
+    echo "ERROR: need jq or python" >&2; return 1
+  fi
+  echo "[neewe] mode → $mode  (main=$main_model, sub=$subagent_model, bg=$bg_model, caveman=$caveman_mode, hooks=$hook_profile, effort=$effort)"
+}
+
+cmd_add_cost() {
+  # neewe add-cost <usd_amount> [--tool <name>] [--model <name>]
+  # Internal helper used by cost-tracker hook. Appends entry to .neewe/.cost-log
+  # and atomically increments cost_budget.spent_usd in state.json.
+  local amount="${1:-}"
+  shift || true
+  local tool="" model=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --tool) tool="${2:-}"; shift 2 ;;
+      --model) model="${2:-}"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  if [ -z "$amount" ]; then return 0; fi
+  if [ ! -f "$STATE_FILE" ]; then return 0; fi   # silent no-op if state not initialized
+  local now log
+  now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  log="${STATE_DIR}/.cost-log"
+  printf '{"ts":"%s","amount_usd":%s,"tool":"%s","model":"%s"}\n' "$now" "$amount" "$tool" "$model" >> "$log"
+  acquire_lock
+  if _have_jq; then
+    jq --argjson a "$amount" '.cost_budget.spent_usd = (.cost_budget.spent_usd // 0) + $a' \
+       "$STATE_FILE" > "${STATE_FILE}.tmp" && mv "${STATE_FILE}.tmp" "$STATE_FILE"
+  elif _have_python; then
+    _py - "$STATE_FILE" "$amount" <<'PYEOF'
+import json, sys
+f, a = sys.argv[1], float(sys.argv[2])
+with open(f) as fh: d = json.load(fh)
+d.setdefault('cost_budget', {})['spent_usd'] = float(d.get('cost_budget', {}).get('spent_usd', 0)) + a
+with open(f + '.tmp', 'w') as fh: json.dump(d, fh, indent=2)
+PYEOF
+    mv "${STATE_FILE}.tmp" "$STATE_FILE"
+  fi
+}
+
+cmd_cost_report() {
+  # neewe cost-report [--since <ISO-date>]
+  if [ ! -f "$STATE_FILE" ]; then
+    echo "[neewe] no state file." >&2; return 1
+  fi
+  local log="${STATE_DIR}/.cost-log"
+  if [ ! -f "$log" ]; then
+    echo "[neewe] no cost log yet at $log"
+    return 0
+  fi
+  local cap spent
+  cap=$(json_get "$STATE_FILE" "cost_budget.cap_usd")
+  spent=$(json_get "$STATE_FILE" "cost_budget.spent_usd")
+  local total_entries
+  total_entries=$(wc -l < "$log" 2>/dev/null || echo 0)
+  echo "Cost Budget"
+  echo "  Cap:    \$$cap"
+  echo "  Spent:  \$$spent"
+  echo ""
+  if [ -n "$cap" ] && [ -n "$spent" ] && _have_python; then
+    local pct
+    pct=$(_py -c "print(f'{(float(\"$spent\")/float(\"$cap\"))*100:.1f}%' if float('$cap')>0 else '0.0%')")
+    echo "  Utilization: $pct"
+    echo ""
+  fi
+  echo "Recent entries (last 10):"
+  tail -10 "$log" 2>/dev/null
+  echo ""
+  echo "Total log entries: $total_entries"
+}
+
 cmd_help() {
   cat <<'EOF'
 neewe — NEEWE Framework CLI
@@ -203,16 +403,29 @@ COMMANDS:
                           phases: 00-intake | 01-spec | 02-plan | 03-execute
                                   | 04-validate | 05-goal-mode
   get <field>             Read a field (dot-path, e.g. model_routing.main)
+  goal "<text>" [--budget USD]
+                          Set active goal + reset spent + (optionally) set budget cap
+  mode <m>                Cascade mode → model_routing / caveman / hook_profile / output_style / effort
+                          modes: thrift | balanced | quality
+                            thrift  = sonnet+sonnet+haiku, caveman:full, hooks:minimal, effort:low
+                            balanced = opusplan+sonnet+haiku, caveman:full, hooks:standard, effort:high
+                            quality = opus[1m]+opus+haiku, caveman:off, hooks:strict, effort:xhigh
+  add-cost <USD> [--tool T] [--model M]
+                          Internal: appends to .cost-log + increments spent_usd. Used by hooks.
+  cost-report             Show budget cap, spent, utilization %, last 10 entries
   help                    Print this help
 
 EXAMPLES:
   neewe init
-  neewe set-phase 01-spec
-  neewe get phase
-  neewe get model_routing.main
+  neewe goal "Ship the /search endpoint" --budget 3.00
+  neewe mode balanced
+  neewe set-phase 03-execute
+  neewe cost-report
+  neewe get cost_budget.spent_usd
 
-State file:  .neewe/state.json
-Lock file:   .neewe/.state.lock  (atomic mkdir-based, 30s stale detection)
+State file:    .neewe/state.json
+Cost log:      .neewe/.cost-log    (JSONL, append-only, hook-managed)
+Lock file:     .neewe/.state.lock  (atomic mkdir-based, 5s stale threshold)
 EOF
 }
 
@@ -225,6 +438,10 @@ case "${1:-help}" in
   show)        cmd_show ;;
   set-phase)   shift; cmd_set_phase "${1:-}" ;;
   get)         shift; cmd_get "${1:-}" ;;
+  goal)        shift; cmd_goal "$@" ;;
+  mode)        shift; cmd_mode "${1:-}" ;;
+  add-cost)    shift; cmd_add_cost "$@" ;;
+  cost-report) cmd_cost_report ;;
   help|-h|--help) cmd_help ;;
   *)
     echo "[neewe] unknown command: $1" >&2
