@@ -2,7 +2,17 @@
 
 The umbrella plugin of the NEEWE Framework.
 
-**Status:** Sprint 1 scaffold — not yet functional. Track progress at [`NeeweTec/neewe-ai-fw`](https://github.com/NeeweTec/neewe-ai-fw).
+**Status:** v0.5.0 (pre-release beta). Production-ready governance trio + Goal Mode + Dashboard + MNEME L4 foundation. Track progress at [`NeeweTec/neewe-ai-fw`](https://github.com/NeeweTec/neewe-ai-fw).
+
+## Windows notes
+
+NEEWE CLI tools (`neewe`, `neewe-dashboard`, `neewe-l4-mcp`) are bash scripts with `.cmd` polyglot wrappers. They work in:
+
+- **Git Bash (recommended)** — full functionality, all subcommands work
+- **WSL** — full functionality
+- **PowerShell** — works via `.cmd` wrappers if Git Bash is in PATH. If `neewe` is "not recognized": add the plugin bin/ to PATH or use Git Bash for NEEWE commands. The agent itself uses the Bash tool, so it works regardless of which shell you launch it from.
+
+The path is: `~/.claude/plugins/cache/neewe/neewe-core/<version>/bin/`
 
 ## What ships in `neewe-core` (when complete)
 
