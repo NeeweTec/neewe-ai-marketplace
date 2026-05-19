@@ -1,0 +1,224 @@
+#!/usr/bin/env node
+/**
+ * neewe-l4-mcp — minimal MCP stdio server exposing NEEWE L4 (MNEME) query tools.
+ * (Sprint 5 wave 4 — skeleton; expand in Sprint 5.5)
+ *
+ * Tools exposed:
+ *   - vault_search(query, limit?)            grep the vault for a substring; returns file:line hits
+ *   - vault_backlinks(page_name)             find all vault pages with [[<page_name>]] reference
+ *   - lint_status()                          summary of .neewe/vault/lint/ (orphans, contradictions, stale)
+ *   - gate_status(phase?)                    latest aggregate.json for a phase (or all)
+ *   - decision_lookup(slug_or_keyword)       grep .neewe/vault/decisions/ + return matching ADRs
+ *
+ * Speaks MCP over stdio per the Anthropic spec. Zero npm deps.
+ *
+ * To wire into a NEEWE project's .mcp.json:
+ *   {
+ *     "mcpServers": {
+ *       "neewe-l4": {
+ *         "command": "node",
+ *         "args": ["${CLAUDE_PLUGIN_ROOT}/bin/neewe-l4-mcp"]
+ *       }
+ *     }
+ *   }
+ */
+
+'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
+const readline = require('node:readline');
+
+// ── Tool implementations ───────────────────────────────────────────────────
+
+function vaultSearch(query, limit = 20) {
+  const results = [];
+  const root = '.neewe/vault';
+  if (!fs.existsSync(root)) return { results, error: 'vault not found; run `neewe l4-init`' };
+  const q = String(query || '').toLowerCase();
+  if (!q) return { results: [], error: 'empty query' };
+  function walk(dir) {
+    if (results.length >= limit) return;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (results.length >= limit) return;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full);
+      else if (e.isFile() && e.name.endsWith('.md')) {
+        let content;
+        try { content = fs.readFileSync(full, 'utf8'); } catch { continue; }
+        const lines = content.split('\n');
+        for (let i = 0; i < lines.length && results.length < limit; i++) {
+          if (lines[i].toLowerCase().includes(q)) {
+            results.push({ file: full, line: i + 1, text: lines[i].trim().slice(0, 200) });
+          }
+        }
+      }
+    }
+  }
+  walk(root);
+  return { results, count: results.length };
+}
+
+function vaultBacklinks(pageName) {
+  const results = [];
+  const root = '.neewe/vault';
+  if (!fs.existsSync(root)) return { results, error: 'vault not found' };
+  const target = String(pageName || '').replace(/[[\]]/g, '');
+  if (!target) return { results: [], error: 'empty page name' };
+  const pattern = `[[${target}]]`;
+  function walk(dir) {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full);
+      else if (e.isFile() && e.name.endsWith('.md')) {
+        let content;
+        try { content = fs.readFileSync(full, 'utf8'); } catch { continue; }
+        if (content.includes(pattern)) {
+          const lines = content.split('\n');
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i].includes(pattern)) {
+              results.push({ file: full, line: i + 1, text: lines[i].trim().slice(0, 200) });
+            }
+          }
+        }
+      }
+    }
+  }
+  walk(root);
+  return { page: target, backlinks: results, count: results.length };
+}
+
+function lintStatus() {
+  const lintDir = '.neewe/vault/lint';
+  if (!fs.existsSync(lintDir)) return { status: 'no-lint-yet', files: [], note: 'run /neewe-l4-lint to generate' };
+  let files;
+  try { files = fs.readdirSync(lintDir).filter(f => f.endsWith('.md')); } catch { files = []; }
+  return { status: 'ok', total_lint_findings: files.length, files: files.slice(0, 50) };
+}
+
+function gateStatus(phase) {
+  const root = '.neewe/gates';
+  if (!fs.existsSync(root)) return { status: 'no-gates', phases: [] };
+  if (phase) {
+    const aggPath = path.join(root, phase, 'latest', 'aggregate.json');
+    try { return { phase, aggregate: JSON.parse(fs.readFileSync(aggPath, 'utf8')) }; }
+    catch { return { phase, aggregate: null, error: 'no gate run for this phase' }; }
+  }
+  let phases;
+  try { phases = fs.readdirSync(root).filter(p => !p.startsWith('.')); } catch { phases = []; }
+  const all = {};
+  for (const p of phases) {
+    const aggPath = path.join(root, p, 'latest', 'aggregate.json');
+    try { all[p] = JSON.parse(fs.readFileSync(aggPath, 'utf8')); } catch { all[p] = null; }
+  }
+  return { phases: all };
+}
+
+function decisionLookup(keyword) {
+  const dir = '.neewe/vault/decisions';
+  if (!fs.existsSync(dir)) return { results: [], error: 'no decisions/ yet' };
+  const q = String(keyword || '').toLowerCase();
+  if (!q) return { results: [], error: 'empty keyword' };
+  const results = [];
+  let files;
+  try { files = fs.readdirSync(dir).filter(f => f.endsWith('.md')); } catch { return { results: [] }; }
+  for (const f of files) {
+    const full = path.join(dir, f);
+    let content;
+    try { content = fs.readFileSync(full, 'utf8'); } catch { continue; }
+    if (content.toLowerCase().includes(q) || f.toLowerCase().includes(q)) {
+      results.push({ file: full, name: f, preview: content.slice(0, 500) });
+    }
+  }
+  return { keyword: q, results, count: results.length };
+}
+
+// ── MCP protocol (stdio JSON-RPC) ──────────────────────────────────────────
+
+const TOOLS = [
+  {
+    name: 'vault_search',
+    description: 'Search NEEWE vault markdown files for a substring. Returns file:line hits.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'substring to search for (case-insensitive)' },
+        limit: { type: 'integer', description: 'max results (default 20)' }
+      },
+      required: ['query']
+    }
+  },
+  {
+    name: 'vault_backlinks',
+    description: 'Find all vault pages that link to a given page via [[Page Name]] syntax.',
+    inputSchema: {
+      type: 'object',
+      properties: { page_name: { type: 'string' } },
+      required: ['page_name']
+    }
+  },
+  {
+    name: 'lint_status',
+    description: 'Summary of L4 vault lint findings (orphans, contradictions, stale claims).',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'gate_status',
+    description: 'Latest governance trio aggregate verdict for a phase (or all phases).',
+    inputSchema: {
+      type: 'object',
+      properties: { phase: { type: 'string', description: 'e.g. "03-execute"; omit for all phases' } }
+    }
+  },
+  {
+    name: 'decision_lookup',
+    description: 'Search ADRs in vault/decisions/ by keyword (filename or content match).',
+    inputSchema: {
+      type: 'object',
+      properties: { keyword: { type: 'string' } },
+      required: ['keyword']
+    }
+  }
+];
+
+function handleRequest(req) {
+  const { id, method, params } = req;
+  switch (method) {
+    case 'initialize':
+      return { jsonrpc: '2.0', id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'neewe-l4-mcp', version: '0.1.0' } } };
+    case 'tools/list':
+      return { jsonrpc: '2.0', id, result: { tools: TOOLS } };
+    case 'tools/call': {
+      const { name, arguments: args = {} } = params || {};
+      try {
+        let result;
+        switch (name) {
+          case 'vault_search':    result = vaultSearch(args.query, args.limit); break;
+          case 'vault_backlinks': result = vaultBacklinks(args.page_name); break;
+          case 'lint_status':     result = lintStatus(); break;
+          case 'gate_status':     result = gateStatus(args.phase); break;
+          case 'decision_lookup': result = decisionLookup(args.keyword); break;
+          default: throw new Error(`unknown tool: ${name}`);
+        }
+        return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] } };
+      } catch (e) {
+        return { jsonrpc: '2.0', id, error: { code: -32000, message: e.message } };
+      }
+    }
+    default:
+      return { jsonrpc: '2.0', id, error: { code: -32601, message: `method not supported: ${method}` } };
+  }
+}
+
+const rl = readline.createInterface({ input: process.stdin, terminal: false });
+rl.on('line', (line) => {
+  if (!line.trim()) return;
+  let req;
+  try { req = JSON.parse(line); } catch { return; }
+  const resp = handleRequest(req);
+  if (resp) process.stdout.write(JSON.stringify(resp) + '\n');
+});

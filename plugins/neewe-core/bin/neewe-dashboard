@@ -1,0 +1,264 @@
+#!/usr/bin/env node
+/**
+ * neewe-dashboard — EP-OPUS-13 local web UI for NEEWE (Sprint 5 wave 3)
+ *
+ * Minimal HTTP server on 127.0.0.1:<port> (default 7878). Token auth via
+ * ${HOME}/.neewe/dashboard-token (generated on first run; perms 0600).
+ * Serves a single-page UI at /; SSE stream at /api/events; JSON endpoints
+ * for state, cost, squad, gates, settings.
+ *
+ * Zero npm deps. Node 18+. Bun-compatible (uses node: prefix imports).
+ *
+ * Usage:
+ *   neewe-dashboard start [--port N]   start server (default 7878)
+ *   neewe-dashboard token              print the auth token (use in browser localStorage)
+ *   neewe-dashboard help               print this help
+ *
+ * Auto-started by monitors.json when the plugin is enabled.
+ */
+
+'use strict';
+
+const http = require('node:http');
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const os = require('node:os');
+
+const HOME = os.homedir();
+const TOKEN_FILE = path.join(HOME, '.neewe', 'dashboard-token');
+const DEFAULT_PORT = 7878;
+
+// Locate the dashboard UI dir (plugin-relative).
+function findUiDir() {
+  const candidates = [
+    path.join(__dirname, '..', 'dashboard', 'ui'),
+    path.join(process.env.CLAUDE_PLUGIN_ROOT || '', 'dashboard', 'ui'),
+  ];
+  for (const c of candidates) {
+    if (c && fs.existsSync(c)) return c;
+  }
+  return null;
+}
+
+function ensureToken() {
+  try { fs.mkdirSync(path.dirname(TOKEN_FILE), { recursive: true }); } catch (_) {}
+  if (fs.existsSync(TOKEN_FILE)) {
+    return fs.readFileSync(TOKEN_FILE, 'utf8').trim();
+  }
+  const token = crypto.randomBytes(32).toString('hex');
+  fs.writeFileSync(TOKEN_FILE, token + '\n', { mode: 0o600 });
+  return token;
+}
+
+function readJsonSafe(file) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (_) { return null; }
+}
+
+function readTextSafe(file, maxBytes = 65536) {
+  try {
+    const data = fs.readFileSync(file, 'utf8');
+    return data.length > maxBytes ? data.slice(-maxBytes) : data;
+  } catch (_) { return ''; }
+}
+
+function authed(req, token) {
+  // Accept token from X-Token header OR ?token= query param.
+  const hdr = req.headers['x-token'];
+  if (hdr && hdr === token) return true;
+  const url = new URL(req.url, 'http://localhost');
+  if (url.searchParams.get('token') === token) return true;
+  return false;
+}
+
+function sendJson(res, status, body) {
+  res.writeHead(status, {
+    'Content-Type': 'application/json',
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+  });
+  res.end(JSON.stringify(body));
+}
+
+function sendText(res, status, body, contentType = 'text/plain; charset=utf-8') {
+  res.writeHead(status, { 'Content-Type': contentType, 'Cache-Control': 'no-store' });
+  res.end(body);
+}
+
+function getState() {
+  return readJsonSafe('.neewe/state.json') || {};
+}
+
+function getCostSummary() {
+  const state = getState();
+  const cap = state?.cost_budget?.cap_usd ?? 0;
+  const spent = state?.cost_budget?.spent_usd ?? 0;
+  const log = readTextSafe('.neewe/.cost-log');
+  const entries = log.trim().split('\n').filter(Boolean).slice(-50).map(line => {
+    try { return JSON.parse(line); } catch (_) { return null; }
+  }).filter(Boolean);
+  return {
+    cap_usd: cap,
+    spent_usd: spent,
+    utilization_pct: cap > 0 ? (spent / cap * 100) : 0,
+    recent: entries.slice(-10),
+    by_tool: aggregateBy(entries, 'tool'),
+    by_model: aggregateBy(entries, 'model'),
+  };
+}
+
+function aggregateBy(entries, key) {
+  const map = {};
+  for (const e of entries) {
+    const k = e[key] || 'unknown';
+    map[k] = (map[k] || 0) + Number(e.amount_usd || 0);
+  }
+  return Object.entries(map).map(([k, v]) => ({ [key]: k, amount_usd: +v.toFixed(6) }))
+    .sort((a, b) => b.amount_usd - a.amount_usd);
+}
+
+function getGates() {
+  const out = {};
+  try {
+    const phases = fs.readdirSync('.neewe/gates').filter(p => !p.startsWith('.'));
+    for (const phase of phases) {
+      const latestPath = path.join('.neewe/gates', phase, 'latest', 'aggregate.json');
+      const agg = readJsonSafe(latestPath);
+      if (agg) out[phase] = agg;
+    }
+  } catch (_) {}
+  return out;
+}
+
+function tailEvents(maxLines = 100) {
+  // For now, "events" = vault/log.md tail (chronological project events) + cost-log tail.
+  const events = [];
+  const vaultLog = readTextSafe('.neewe/vault/log.md');
+  if (vaultLog) {
+    const matches = vaultLog.match(/^## \[(\d{4}-\d{2}-\d{2})\] (\w+) \| (.+)$/gm) || [];
+    for (const m of matches.slice(-30)) {
+      const parts = m.match(/^## \[(\d{4}-\d{2}-\d{2})\] (\w+) \| (.+)$/);
+      if (parts) events.push({ ts: parts[1], type: parts[2], subject: parts[3], source: 'vault' });
+    }
+  }
+  return events.slice(-maxLines);
+}
+
+// ─── Server ────────────────────────────────────────────────────────────────
+
+function startServer(port, token, uiDir) {
+  const sseClients = new Set();
+
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+
+    // Health check (no auth — for monitors.json).
+    if (url.pathname === '/health') {
+      return sendJson(res, 200, { ok: true, ts: new Date().toISOString() });
+    }
+
+    // SSE stream (auth required).
+    if (url.pathname === '/api/events') {
+      if (!authed(req, token)) return sendJson(res, 401, { error: 'auth required' });
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-store',
+        'Connection': 'keep-alive',
+      });
+      res.write(`data: ${JSON.stringify({ type: 'connected', ts: new Date().toISOString() })}\n\n`);
+      sseClients.add(res);
+      req.on('close', () => sseClients.delete(res));
+      return;
+    }
+
+    // JSON API endpoints (auth required).
+    if (url.pathname.startsWith('/api/')) {
+      if (!authed(req, token)) return sendJson(res, 401, { error: 'auth required' });
+      if (url.pathname === '/api/state') return sendJson(res, 200, getState());
+      if (url.pathname === '/api/cost') return sendJson(res, 200, getCostSummary());
+      if (url.pathname === '/api/gates') return sendJson(res, 200, getGates());
+      if (url.pathname === '/api/events-snapshot') return sendJson(res, 200, { events: tailEvents() });
+      return sendJson(res, 404, { error: 'unknown endpoint' });
+    }
+
+    // Static UI (no auth on the HTML shell — auth happens via token in localStorage).
+    let pathName = url.pathname === '/' ? '/index.html' : url.pathname;
+    if (pathName.includes('..')) return sendText(res, 400, 'bad request');
+    if (!uiDir) return sendText(res, 500, 'UI dir not found');
+    const filePath = path.join(uiDir, pathName);
+    if (!filePath.startsWith(uiDir)) return sendText(res, 400, 'bad request');
+    if (!fs.existsSync(filePath)) return sendText(res, 404, 'not found');
+    const ext = path.extname(filePath);
+    const ct = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' }[ext] || 'application/octet-stream';
+    return sendText(res, 200, fs.readFileSync(filePath, 'utf8'), ct);
+  });
+
+  // Periodic SSE pings + state snapshots (every 2s).
+  setInterval(() => {
+    if (sseClients.size === 0) return;
+    const snapshot = {
+      type: 'snapshot',
+      ts: new Date().toISOString(),
+      state: getState(),
+      cost: getCostSummary(),
+    };
+    const payload = `data: ${JSON.stringify(snapshot)}\n\n`;
+    for (const client of sseClients) {
+      try { client.write(payload); } catch (_) { sseClients.delete(client); }
+    }
+  }, 2000);
+
+  // Auto-shutdown if no activity for 10 minutes (when launched by monitors).
+  let lastActivity = Date.now();
+  server.on('request', () => { lastActivity = Date.now(); });
+  setInterval(() => {
+    if (Date.now() - lastActivity > 10 * 60 * 1000 && sseClients.size === 0) {
+      console.error('[neewe-dashboard] no activity for 10 min; exiting');
+      process.exit(0);
+    }
+  }, 60_000);
+
+  server.listen(port, '127.0.0.1', () => {
+    console.error(`[neewe-dashboard] listening on http://127.0.0.1:${port}/?token=${token}`);
+    console.error(`[neewe-dashboard] token file: ${TOKEN_FILE}`);
+  });
+
+  return server;
+}
+
+// ─── Main ──────────────────────────────────────────────────────────────────
+
+const args = process.argv.slice(2);
+const cmd = args[0] || 'help';
+
+if (cmd === 'token') {
+  process.stdout.write(ensureToken() + '\n');
+  process.exit(0);
+}
+
+if (cmd === 'start') {
+  let port = DEFAULT_PORT;
+  const portIdx = args.indexOf('--port');
+  if (portIdx !== -1 && args[portIdx + 1]) port = parseInt(args[portIdx + 1], 10) || DEFAULT_PORT;
+  const token = ensureToken();
+  const uiDir = findUiDir();
+  if (!uiDir) {
+    console.error('[neewe-dashboard] ERROR: dashboard/ui dir not found (tried plugin-relative + CLAUDE_PLUGIN_ROOT)');
+    process.exit(1);
+  }
+  startServer(port, token, uiDir);
+  return;
+}
+
+// help
+process.stdout.write(`neewe-dashboard — EP-OPUS-13 local web UI (Sprint 5 wave 3)
+
+USAGE:
+  neewe-dashboard start [--port N]   Start server (default 7878)
+  neewe-dashboard token              Print auth token
+  neewe-dashboard help               This help
+
+Token file: ${TOKEN_FILE}
+Open: http://127.0.0.1:7878/?token=<token>
+`);
+process.exit(0);

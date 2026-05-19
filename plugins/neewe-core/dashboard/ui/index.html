@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NEEWE Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <div class="brand">⚡ NEEWE Dashboard</div>
+  <div class="conn" id="conn-status">connecting…</div>
+</header>
+
+<main>
+  <!-- Phase + Mode + Goal -->
+  <section class="panel" id="panel-state">
+    <h2>Runtime State</h2>
+    <div class="kv-grid">
+      <div class="kv"><span class="k">Phase</span><span class="v" id="state-phase">—</span></div>
+      <div class="kv"><span class="k">Mode</span><span class="v" id="state-mode">—</span></div>
+      <div class="kv"><span class="k">Active goal</span><span class="v" id="state-goal">—</span></div>
+      <div class="kv"><span class="k">Active squad</span><span class="v" id="state-squad">—</span></div>
+      <div class="kv"><span class="k">Permission mode</span><span class="v" id="state-perm">—</span></div>
+      <div class="kv"><span class="k">Output style</span><span class="v" id="state-style">—</span></div>
+      <div class="kv"><span class="k">Hook profile</span><span class="v" id="state-hooks">—</span></div>
+      <div class="kv"><span class="k">Caveman</span><span class="v" id="state-caveman">—</span></div>
+    </div>
+  </section>
+
+  <!-- Cost Budget -->
+  <section class="panel" id="panel-cost">
+    <h2>Cost Budget <span class="hint">(approximate; reconcile with <code>/usage</code>)</span></h2>
+    <div class="cost-summary">
+      <div class="cost-big" id="cost-big">$0.00 / $0.00</div>
+      <div class="cost-util">Utilization: <span id="cost-util-val">0%</span></div>
+      <div class="cost-bar"><div class="cost-bar-fill" id="cost-bar-fill" style="width:0%"></div></div>
+    </div>
+    <div class="cost-breakdown">
+      <div class="cost-table">
+        <h3>Top spend by tool</h3>
+        <table id="cost-by-tool"><thead><tr><th>Tool</th><th>USD</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="cost-table">
+        <h3>Top spend by model</h3>
+        <table id="cost-by-model"><thead><tr><th>Model</th><th>USD</th></tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Model Routing -->
+  <section class="panel" id="panel-routing">
+    <h2>Model Routing</h2>
+    <div class="kv-grid">
+      <div class="kv"><span class="k">Main</span><span class="v" id="route-main">—</span></div>
+      <div class="kv"><span class="k">Subagents</span><span class="v" id="route-sub">—</span></div>
+      <div class="kv"><span class="k">Background</span><span class="v" id="route-bg">—</span></div>
+      <div class="kv"><span class="k">Effort</span><span class="v" id="route-effort">—</span></div>
+    </div>
+  </section>
+
+  <!-- Gates -->
+  <section class="panel" id="panel-gates">
+    <h2>Governance Gates (latest per phase)</h2>
+    <div id="gates-content"><em>no gate runs yet</em></div>
+  </section>
+
+  <!-- Event Log -->
+  <section class="panel" id="panel-events">
+    <h2>Event Log <span class="hint">(vault/log.md tail)</span></h2>
+    <ul id="event-list"><li><em>no events yet</em></li></ul>
+  </section>
+</main>
+
+<footer>
+  <div>NEEWE Framework · <code>neewe show</code> for raw state · <code>neewe cost-report</code> for full cost log</div>
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>
