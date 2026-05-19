@@ -1,0 +1,228 @@
+#!/usr/bin/env bash
+# neewe — NEEWE Framework CLI (Sprint 1 minimum: phase-state primitive)
+#
+# Subcommands:
+#   neewe init                          Create .neewe/state.json with defaults
+#   neewe show                          Pretty-print current state
+#   neewe set-phase <phase>             Atomically update phase + phase_started_at
+#   neewe get <field>                   Read a field (dot-path: model_routing.main)
+#   neewe help                          Print this help
+#
+# Phases: 00-intake | 01-spec | 02-plan | 03-execute | 04-validate | 05-goal-mode
+#
+# State file: .neewe/state.json  (lockfile: .neewe/.state.lock — atomic mkdir-based)
+#
+# Polyglot: invoked from neewe.cmd on Windows (Git Bash); direct on Unix.
+
+set -euo pipefail
+
+NEEWE_VERSION="0.1.0"
+STATE_DIR=".neewe"
+STATE_FILE="${STATE_DIR}/state.json"
+LOCK_DIR="${STATE_DIR}/.state.lock"
+
+# ────────────────────────────────────────────────────────────────────────────
+# JSON helpers (prefer jq; fall back to python3)
+# ────────────────────────────────────────────────────────────────────────────
+
+_have_jq() { command -v jq >/dev/null 2>&1; }
+_have_python() { command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1; }
+
+_py() {
+  if command -v python3 >/dev/null 2>&1; then python3 "$@"; else python "$@"; fi
+}
+
+json_get() {
+  # json_get <file> <dot.path>
+  local file="$1" path="$2"
+  if _have_jq; then
+    jq -r ".${path} // empty" "$file"
+  elif _have_python; then
+    _py -c "import json,sys; d=json.load(open('${file}'));
+parts='${path}'.split('.')
+for p in parts: d=d.get(p, '') if isinstance(d, dict) else ''
+print(d if d is not None else '')"
+  else
+    echo "ERROR: need jq or python to parse JSON" >&2
+    return 1
+  fi
+}
+
+json_set_phase() {
+  # json_set_phase <file> <new_phase>
+  local file="$1" phase="$2"
+  local now
+  now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  if _have_jq; then
+    jq --arg p "$phase" --arg t "$now" '.phase = $p | .phase_started_at = $t' "$file" > "${file}.tmp"
+    mv "${file}.tmp" "$file"
+  elif _have_python; then
+    _py -c "
+import json
+with open('${file}') as f: d = json.load(f)
+d['phase'] = '${phase}'
+d['phase_started_at'] = '${now}'
+with open('${file}.tmp', 'w') as f: json.dump(d, f, indent=2)
+" && mv "${file}.tmp" "$file"
+  else
+    echo "ERROR: need jq or python to mutate JSON" >&2
+    return 1
+  fi
+}
+
+# ────────────────────────────────────────────────────────────────────────────
+# Lock helpers (atomic mkdir-based — POSIX-portable + works on Git Bash)
+# ────────────────────────────────────────────────────────────────────────────
+
+acquire_lock() {
+  local max_attempts=20
+  local attempt=0
+  while [ $attempt -lt $max_attempts ]; do
+    if mkdir "$LOCK_DIR" 2>/dev/null; then
+      trap 'rmdir "'"$LOCK_DIR"'" 2>/dev/null || true' EXIT
+      return 0
+    fi
+    # Stale lock detection: if older than 30s, force-clear.
+    if [ -d "$LOCK_DIR" ]; then
+      local age
+      age=$(( $(date +%s) - $(stat -c %Y "$LOCK_DIR" 2>/dev/null || stat -f %m "$LOCK_DIR" 2>/dev/null || echo 0) ))
+      if [ "$age" -gt 30 ]; then
+        echo "[neewe] clearing stale lock (age=${age}s)" >&2
+        rmdir "$LOCK_DIR" 2>/dev/null || true
+      fi
+    fi
+    # Jittered sleep (50-200 ms).
+    sleep "0.$(printf '%03d' $((50 + RANDOM % 150)))"
+    attempt=$((attempt + 1))
+  done
+  echo "[neewe] ERROR: could not acquire lock after ${max_attempts} attempts" >&2
+  return 1
+}
+
+# ────────────────────────────────────────────────────────────────────────────
+# Subcommands
+# ────────────────────────────────────────────────────────────────────────────
+
+cmd_init() {
+  mkdir -p "$STATE_DIR"
+  if [ -f "$STATE_FILE" ]; then
+    echo "[neewe] state already exists at $STATE_FILE — leaving untouched" >&2
+    return 0
+  fi
+  local now
+  now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  cat > "$STATE_FILE" <<EOF
+{
+  "\$schema": "neewe-state-v1",
+  "neewe_version": "${NEEWE_VERSION}",
+  "phase": "00-intake",
+  "phase_started_at": "${now}",
+  "mode": "balanced",
+  "model_routing": {
+    "main": "opusplan",
+    "subagents": "sonnet",
+    "background": "haiku"
+  },
+  "permission_mode": "default",
+  "output_style": "NEEWE Startup",
+  "context_mode_enabled": false,
+  "caveman_mode": "off",
+  "hook_profile": "standard",
+  "active_goal": null,
+  "active_squad": null,
+  "cost_budget": {
+    "cap_usd": 5.00,
+    "spent_usd": 0.00
+  }
+}
+EOF
+  echo "[neewe] initialized $STATE_FILE (phase: 00-intake, mode: balanced)"
+}
+
+cmd_show() {
+  if [ ! -f "$STATE_FILE" ]; then
+    echo "[neewe] no state file. Run: neewe init" >&2
+    return 1
+  fi
+  if _have_jq; then jq . "$STATE_FILE"; else cat "$STATE_FILE"; fi
+}
+
+cmd_set_phase() {
+  local phase="${1:-}"
+  case "$phase" in
+    00-intake|01-spec|02-plan|03-execute|04-validate|05-goal-mode) ;;
+    "")
+      echo "[neewe] ERROR: missing phase. Usage: neewe set-phase <phase>" >&2
+      echo "        Valid phases: 00-intake | 01-spec | 02-plan | 03-execute | 04-validate | 05-goal-mode" >&2
+      return 1
+      ;;
+    *)
+      echo "[neewe] ERROR: unknown phase '$phase'. Valid: 00-intake|01-spec|02-plan|03-execute|04-validate|05-goal-mode" >&2
+      return 1
+      ;;
+  esac
+  if [ ! -f "$STATE_FILE" ]; then
+    echo "[neewe] no state file. Run: neewe init" >&2
+    return 1
+  fi
+  acquire_lock
+  json_set_phase "$STATE_FILE" "$phase"
+  echo "[neewe] phase → $phase"
+}
+
+cmd_get() {
+  local field="${1:-}"
+  if [ -z "$field" ]; then
+    echo "[neewe] ERROR: missing field. Usage: neewe get <dot.path>" >&2
+    return 1
+  fi
+  if [ ! -f "$STATE_FILE" ]; then
+    echo "[neewe] no state file. Run: neewe init" >&2
+    return 1
+  fi
+  json_get "$STATE_FILE" "$field"
+}
+
+cmd_help() {
+  cat <<'EOF'
+neewe — NEEWE Framework CLI
+
+USAGE:
+  neewe <command> [args]
+
+COMMANDS:
+  init                    Create .neewe/state.json with defaults
+  show                    Pretty-print current state
+  set-phase <phase>       Atomically update phase + phase_started_at
+                          phases: 00-intake | 01-spec | 02-plan | 03-execute
+                                  | 04-validate | 05-goal-mode
+  get <field>             Read a field (dot-path, e.g. model_routing.main)
+  help                    Print this help
+
+EXAMPLES:
+  neewe init
+  neewe set-phase 01-spec
+  neewe get phase
+  neewe get model_routing.main
+
+State file:  .neewe/state.json
+Lock file:   .neewe/.state.lock  (atomic mkdir-based, 30s stale detection)
+EOF
+}
+
+# ────────────────────────────────────────────────────────────────────────────
+# Dispatcher
+# ────────────────────────────────────────────────────────────────────────────
+
+case "${1:-help}" in
+  init)        cmd_init ;;
+  show)        cmd_show ;;
+  set-phase)   shift; cmd_set_phase "${1:-}" ;;
+  get)         shift; cmd_get "${1:-}" ;;
+  help|-h|--help) cmd_help ;;
+  *)
+    echo "[neewe] unknown command: $1" >&2
+    cmd_help
+    exit 1
+    ;;
+esac

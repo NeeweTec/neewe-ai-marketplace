@@ -26,6 +26,22 @@ fi
 # Read SKILL.md body (strip YAML frontmatter for token economy — keep the doctrine, drop the metadata).
 SKILL_CONTENT=$(awk 'BEGIN{frontmatter=0; done=0} /^---$/ { if (frontmatter == 0) { frontmatter=1; next } else { frontmatter=0; done=1; next } } done==1 { print }' "$SKILL_PATH")
 
+# Append phase-state context if .neewe/state.json exists in the project.
+# Agents read this to know current phase/mode/goal without an extra tool call.
+STATE_FILE=".neewe/state.json"
+if [ -f "$STATE_FILE" ]; then
+  if command -v jq >/dev/null 2>&1; then
+    PHASE=$(jq -r '.phase // "unknown"' "$STATE_FILE")
+    MODE=$(jq -r '.mode // "balanced"' "$STATE_FILE")
+    GOAL=$(jq -r '.active_goal // "none"' "$STATE_FILE")
+    SQUAD=$(jq -r '.active_squad // "none"' "$STATE_FILE")
+    BUDGET_CAP=$(jq -r '.cost_budget.cap_usd // 0' "$STATE_FILE")
+    BUDGET_SPENT=$(jq -r '.cost_budget.spent_usd // 0' "$STATE_FILE")
+    STATE_BLOCK=$(printf '\n\n---\n\n## Current NEEWE Runtime State\n\n- **Phase:** %s\n- **Mode:** %s\n- **Active goal:** %s\n- **Active squad:** %s\n- **Cost budget:** $%.2f spent of $%.2f cap\n\nUse `neewe show` to inspect full state. Run `neewe set-phase <phase>` to transition. Read the `neewe-state` skill for the schema reference.\n' "$PHASE" "$MODE" "$GOAL" "$SQUAD" "$BUDGET_SPENT" "$BUDGET_CAP")
+    SKILL_CONTENT="${SKILL_CONTENT}${STATE_BLOCK}"
+  fi
+fi
+
 # JSON-escape via printf + jq if available, else fallback to python.
 if command -v jq >/dev/null 2>&1; then
   ESCAPED=$(printf '%s' "$SKILL_CONTENT" | jq -Rs .)
