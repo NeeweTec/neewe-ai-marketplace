@@ -75,27 +75,33 @@ with open('${file}.tmp', 'w') as f: json.dump(d, f, indent=2)
 # ────────────────────────────────────────────────────────────────────────────
 
 acquire_lock() {
+  # Stale threshold = 5s. JSON writes complete in <100ms; anything held longer
+  # is a poison pill from a crashed prior invocation.
+  # On stale detection we clear and retry mkdir immediately (no sleep).
   local max_attempts=20
+  local stale_threshold_sec=5
   local attempt=0
   while [ $attempt -lt $max_attempts ]; do
     if mkdir "$LOCK_DIR" 2>/dev/null; then
       trap 'rmdir "'"$LOCK_DIR"'" 2>/dev/null || true' EXIT
       return 0
     fi
-    # Stale lock detection: if older than 30s, force-clear.
+    # Lock exists. Check if it's stale (poison pill from crashed prior run).
     if [ -d "$LOCK_DIR" ]; then
-      local age
-      age=$(( $(date +%s) - $(stat -c %Y "$LOCK_DIR" 2>/dev/null || stat -f %m "$LOCK_DIR" 2>/dev/null || echo 0) ))
-      if [ "$age" -gt 30 ]; then
-        echo "[neewe] clearing stale lock (age=${age}s)" >&2
+      local lock_mtime age
+      lock_mtime=$(stat -c %Y "$LOCK_DIR" 2>/dev/null || stat -f %m "$LOCK_DIR" 2>/dev/null || echo 0)
+      age=$(( $(date +%s) - lock_mtime ))
+      if [ "$age" -gt "$stale_threshold_sec" ]; then
+        echo "[neewe] clearing stale lock (age=${age}s > ${stale_threshold_sec}s threshold) at $LOCK_DIR" >&2
         rmdir "$LOCK_DIR" 2>/dev/null || true
+        continue   # retry mkdir immediately, no sleep
       fi
     fi
-    # Jittered sleep (50-200 ms).
+    # Lock is fresh — another invocation is mid-write. Jittered wait (50-200 ms).
     sleep "0.$(printf '%03d' $((50 + RANDOM % 150)))"
     attempt=$((attempt + 1))
   done
-  echo "[neewe] ERROR: could not acquire lock after ${max_attempts} attempts" >&2
+  echo "[neewe] ERROR: could not acquire lock after ${max_attempts} attempts (lock at $LOCK_DIR)" >&2
   return 1
 }
 

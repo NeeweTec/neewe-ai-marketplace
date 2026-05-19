@@ -18,7 +18,9 @@ fi
 SKILL_PATH="${PLUGIN_ROOT}/skills/using-neewe/SKILL.md"
 
 # If the skill is missing, emit empty additionalContext rather than breaking the session.
+# Surface a stderr warning so a misconfigured install doesn't silently no-op (D4 fix).
 if [ ! -f "$SKILL_PATH" ]; then
+  echo "[neewe-session-start] WARN: using-neewe SKILL.md not found at $SKILL_PATH (CLAUDE_PLUGIN_ROOT=$PLUGIN_ROOT). Verify NEEWE plugin install." >&2
   printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":""}}'
   exit 0
 fi
@@ -28,8 +30,11 @@ SKILL_CONTENT=$(awk 'BEGIN{frontmatter=0; done=0} /^---$/ { if (frontmatter == 0
 
 # Append phase-state context if .neewe/state.json exists in the project.
 # Agents read this to know current phase/mode/goal without an extra tool call.
+# Uses jq if available; falls back to python3/python (D2 fix — Windows hosts
+# without jq were silently dropping this block).
 STATE_FILE=".neewe/state.json"
 if [ -f "$STATE_FILE" ]; then
+  STATE_BLOCK=""
   if command -v jq >/dev/null 2>&1; then
     PHASE=$(jq -r '.phase // "unknown"' "$STATE_FILE")
     MODE=$(jq -r '.mode // "balanced"' "$STATE_FILE")
@@ -38,6 +43,45 @@ if [ -f "$STATE_FILE" ]; then
     BUDGET_CAP=$(jq -r '.cost_budget.cap_usd // 0' "$STATE_FILE")
     BUDGET_SPENT=$(jq -r '.cost_budget.spent_usd // 0' "$STATE_FILE")
     STATE_BLOCK=$(printf '\n\n---\n\n## Current NEEWE Runtime State\n\n- **Phase:** %s\n- **Mode:** %s\n- **Active goal:** %s\n- **Active squad:** %s\n- **Cost budget:** $%.2f spent of $%.2f cap\n\nUse `neewe show` to inspect full state. Run `neewe set-phase <phase>` to transition. Read the `neewe-state` skill for the schema reference.\n' "$PHASE" "$MODE" "$GOAL" "$SQUAD" "$BUDGET_SPENT" "$BUDGET_CAP")
+  elif command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1; then
+    PY="$(command -v python3 2>/dev/null || command -v python)"
+    STATE_BLOCK=$("$PY" - "$STATE_FILE" <<'PYEOF'
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        d = json.load(f)
+except Exception:
+    sys.exit(0)
+def s(v, dflt):
+    return str(v) if v is not None else dflt
+phase = s(d.get("phase"), "unknown")
+mode = s(d.get("mode"), "balanced")
+goal = s(d.get("active_goal"), "none")
+squad = s(d.get("active_squad"), "none")
+cb = d.get("cost_budget") or {}
+try: cap = float(cb.get("cap_usd", 0) or 0)
+except Exception: cap = 0.0
+try: spent = float(cb.get("spent_usd", 0) or 0)
+except Exception: spent = 0.0
+print(f"""
+
+---
+
+## Current NEEWE Runtime State
+
+- **Phase:** {phase}
+- **Mode:** {mode}
+- **Active goal:** {goal}
+- **Active squad:** {squad}
+- **Cost budget:** ${spent:.2f} spent of ${cap:.2f} cap
+
+Use `neewe show` to inspect full state. Run `neewe set-phase <phase>` to transition. Read the `neewe-state` skill for the schema reference.""")
+PYEOF
+)
+  else
+    echo "[neewe-session-start] WARN: neither jq nor python available; skipping runtime state block" >&2
+  fi
+  if [ -n "$STATE_BLOCK" ]; then
     SKILL_CONTENT="${SKILL_CONTENT}${STATE_BLOCK}"
   fi
 fi
