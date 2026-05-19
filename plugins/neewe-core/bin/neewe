@@ -389,6 +389,162 @@ cmd_cost_report() {
   echo "Total log entries: $total_entries"
 }
 
+cmd_l4_init() {
+  # Bootstrap MNEME L4 memory tiers. Idempotent.
+  local created=0 skipped=0 new_log=""
+  # Ensure state.json first.
+  if [ ! -f "$STATE_FILE" ]; then
+    cmd_init
+    new_log="state.json initialized"
+  fi
+  # Vault + graph + raw + planning + handoffs + gates + debug dirs.
+  local dirs=(
+    ".neewe/vault/concepts" ".neewe/vault/entities" ".neewe/vault/decisions"
+    ".neewe/vault/specs" ".neewe/vault/gates" ".neewe/vault/sources" ".neewe/vault/lint"
+    ".neewe/graph" ".neewe/raw/papers" ".neewe/raw/threads" ".neewe/raw/clips" ".neewe/raw/assets"
+    ".neewe/planning" ".neewe/handoffs" ".neewe/gates" ".neewe/debug"
+  )
+  for d in "${dirs[@]}"; do
+    if [ ! -d "$d" ]; then mkdir -p "$d" && created=$((created + 1)); else skipped=$((skipped + 1)); fi
+  done
+  # Seed vault/index.md.
+  if [ ! -f ".neewe/vault/index.md" ]; then
+    cat > ".neewe/vault/index.md" <<'IDX'
+# Vault Index
+
+Content-oriented catalog. Add entries below as you create vault pages.
+
+## Concepts
+(empty)
+
+## Entities
+(services, modules, classes — link with [[wikilinks]])
+
+## Decisions (ADRs)
+(architectural decisions — one file per decision in decisions/)
+
+## Specs
+(00-OV / 01-FN / 02-PL mirrored from spec authoring)
+
+## Gates
+(governance trio verdicts per phase)
+
+## Sources
+(papers, threads, PRs, screenshots — summaries with provenance)
+IDX
+    created=$((created + 1))
+  fi
+  # Seed vault/log.md and append init entry.
+  local now_date
+  now_date=$(date -u +"%Y-%m-%d")
+  if [ ! -f ".neewe/vault/log.md" ]; then
+    cat > ".neewe/vault/log.md" <<LOG
+# Vault Log
+
+Append-only chronological journal. Format: \`## [YYYY-MM-DD] verb | subject\`.
+Parseable via: \`grep "^## \[" log.md\`.
+
+---
+
+## [$now_date] init | NEEWE L4 bootstrapped
+LOG
+    created=$((created + 1))
+  else
+    printf '\n## [%s] init-run | re-initialized (%d dirs created, %d skipped)\n' "$now_date" "$created" "$skipped" >> ".neewe/vault/log.md"
+  fi
+  # Seed vault/schema.md.
+  if [ ! -f ".neewe/vault/schema.md" ]; then
+    cat > ".neewe/vault/schema.md" <<'SCH'
+# Vault Schema (NEEWE-MNEME-v1)
+
+## Conventions
+- File naming: kebab-case, lowercase, .md
+- Links: `[[Page Name]]` (Obsidian-compatible bidirectional)
+- Frontmatter (YAML, required):
+  - `tags:` array
+  - `created:` ISO-8601
+  - `last_updated:` ISO-8601
+  - `confidence:` EXTRACTED | INFERRED | AMBIGUOUS
+  - `sources:` array of [[source/<id>]]
+- Body: elevator pitch, H2 sections, ending [[See also]] block
+
+## Lifecycle (Karpathy LLM-Wiki pattern)
+1. Ingest — new raw source → page + entity/concept updates + log entry
+2. Query — user question → relevant pages → answer FILED BACK as new page
+3. Lint — periodic — contradictions, stale claims, orphans, gaps
+4. Schema-Evolve — when conventions need updating, edit THIS file
+
+## See also
+- [[index]] — content catalog
+- [[log]] — chronological journal
+SCH
+    created=$((created + 1))
+  fi
+  # Seed debug/knowledge-base.md.
+  if [ ! -f ".neewe/debug/knowledge-base.md" ]; then
+    cat > ".neewe/debug/knowledge-base.md" <<'DKB'
+# Debug Knowledge Base
+
+Append-only catalog of bugs encountered + root causes + fixes. Future-self looks here BEFORE re-investigating recurring symptoms.
+
+Format per entry:
+
+## YYYY-MM-DD — <one-line symptom>
+
+- **Symptom:** <observable behavior>
+- **Root cause:** <what was actually wrong>
+- **Fix:** <commit SHA + summary>
+- **Regression test:** <test file:line>
+- **Recurrence guard:** <what would catch this earlier next time>
+DKB
+    created=$((created + 1))
+  fi
+  # CLAUDE.md template seed — only if missing.
+  if [ ! -f "CLAUDE.md" ]; then
+    local template_path="${CLAUDE_PLUGIN_ROOT:-}/templates/CLAUDE.md.template"
+    if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "$template_path" ]; then
+      cp "$template_path" "CLAUDE.md"
+      created=$((created + 1))
+    else
+      cat > "CLAUDE.md" <<'CMD'
+# CLAUDE.md — NEEWE-managed project
+
+This project uses the NEEWE Framework. Doctrine: see using-neewe skill (auto-injected via SessionStart).
+
+## L4 Memory Consultation Rule
+Before grepping code, consult MNEME:
+1. T1 Hot — CLAUDE.md hierarchy (this file)
+2. T2 Vault — .neewe/vault/ (concept pages, ADRs, source summaries)
+3. T3 Graph — .neewe/graph/ via Graphify MCP (when installed)
+4. Raw code — last resort
+
+After answering: fold the answer back into the vault.
+
+(Run `neewe l4-init` to bootstrap; edit this file as your project doctrine grows.)
+CMD
+      created=$((created + 1))
+    fi
+  fi
+  # .gitignore additions (idempotent).
+  local gi=".gitignore"
+  local entries=(
+    ".neewe/state.json" ".neewe/.cost-log" ".neewe/.state.lock"
+    ".neewe/handoffs/" ".neewe/gates/" ".neewe/dashboard-token"
+    ".neewe/vault/.obsidian/"
+  )
+  if [ -f "$gi" ]; then
+    for e in "${entries[@]}"; do
+      if ! grep -qxF "$e" "$gi" 2>/dev/null; then
+        echo "$e" >> "$gi"
+      fi
+    done
+  fi
+  # Report.
+  echo "[neewe] l4-init complete. created=$created skipped=$skipped"
+  echo "[neewe] vault: .neewe/vault/  graph: .neewe/graph/  raw: .neewe/raw/"
+  echo "[neewe] next: edit CLAUDE.md to add project-specific doctrine; install graphify (pip install graphifyy) for T3 graph"
+}
+
 cmd_help() {
   cat <<'EOF'
 neewe — NEEWE Framework CLI
@@ -413,6 +569,8 @@ COMMANDS:
   add-cost <USD> [--tool T] [--model M]
                           Internal: appends to .cost-log + increments spent_usd. Used by hooks.
   cost-report             Show budget cap, spent, utilization %, last 10 entries
+  l4-init                 Bootstrap MNEME L4 memory tiers (vault + graph + raw + handoffs + planning).
+                          Idempotent. Seeds vault/index.md + log.md + schema.md + CLAUDE.md.
   help                    Print this help
 
 EXAMPLES:
@@ -442,6 +600,7 @@ case "${1:-help}" in
   mode)        shift; cmd_mode "${1:-}" ;;
   add-cost)    shift; cmd_add_cost "$@" ;;
   cost-report) cmd_cost_report ;;
+  l4-init)     cmd_l4_init ;;
   help|-h|--help) cmd_help ;;
   *)
     echo "[neewe] unknown command: $1" >&2
