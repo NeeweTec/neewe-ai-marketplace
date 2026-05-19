@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# NEEWE SessionStart hook.
+# Reads the using-neewe SKILL.md from the plugin and injects it as additionalContext
+# on every session startup, clear, or compact event.
+#
+# Inspired by Superpowers' hooks/session-start. Polyglot-wrapped by run-hook.cmd
+# so it works on Windows (Git Bash) and Unix without duplicate files.
+
+set -euo pipefail
+
+# Locate the plugin root via env (set by Claude Code) or fall back to repo layout.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
+if [ -z "$PLUGIN_ROOT" ]; then
+  HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  PLUGIN_ROOT="$(cd "${HOOK_DIR}/.." && pwd)"
+fi
+
+SKILL_PATH="${PLUGIN_ROOT}/skills/using-neewe/SKILL.md"
+
+# If the skill is missing, emit empty additionalContext rather than breaking the session.
+if [ ! -f "$SKILL_PATH" ]; then
+  printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":""}}'
+  exit 0
+fi
+
+# Read SKILL.md body (strip YAML frontmatter for token economy — keep the doctrine, drop the metadata).
+SKILL_CONTENT=$(awk 'BEGIN{frontmatter=0; done=0} /^---$/ { if (frontmatter == 0) { frontmatter=1; next } else { frontmatter=0; done=1; next } } done==1 { print }' "$SKILL_PATH")
+
+# JSON-escape via printf + jq if available, else fallback to python.
+if command -v jq >/dev/null 2>&1; then
+  ESCAPED=$(printf '%s' "$SKILL_CONTENT" | jq -Rs .)
+elif command -v python3 >/dev/null 2>&1; then
+  ESCAPED=$(printf '%s' "$SKILL_CONTENT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+elif command -v python >/dev/null 2>&1; then
+  ESCAPED=$(printf '%s' "$SKILL_CONTENT" | python -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+else
+  # Last-resort manual escape (handles the common cases; full robustness needs jq/python).
+  ESCAPED=$(printf '%s' "$SKILL_CONTENT" | awk 'BEGIN{ORS=""} {gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/\t/, "\\t"); print; print "\\n"}')
+  ESCAPED="\"${ESCAPED}\""
+fi
+
+# Detect harness via env or input JSON to choose the right output shape.
+# Default: Claude Code shape (nested under hookSpecificOutput.additionalContext).
+HARNESS="${CLAUDE_CODE_HARNESS:-claude-code}"
+
+case "$HARNESS" in
+  cursor)
+    printf '{"additional_context":%s}' "$ESCAPED"
+    ;;
+  copilot-cli)
+    printf '{"additionalContext":%s}' "$ESCAPED"
+    ;;
+  *)
+    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":%s}}' "$ESCAPED"
+    ;;
+esac
+
+exit 0
