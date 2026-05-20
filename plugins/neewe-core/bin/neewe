@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-NEEWE_VERSION="0.1.0"
+NEEWE_VERSION="1.0.8"
 STATE_DIR=".neewe"
 STATE_FILE="${STATE_DIR}/state.json"
 LOCK_DIR="${STATE_DIR}/.state.lock"
@@ -796,6 +796,7 @@ case "$1" in
   cost-report) cmd_cost_report ;;
   l4-init)     cmd_l4_init ;;
   tui)         exec bash "$(dirname "${BASH_SOURCE[0]}")/neewe-tui" ;;
+  version|--version|-v) echo "neewe $NEEWE_VERSION" ;;
   help|-h|--help) cmd_help ;;
   *)
     echo "[neewe] unknown command: $1" >&2
