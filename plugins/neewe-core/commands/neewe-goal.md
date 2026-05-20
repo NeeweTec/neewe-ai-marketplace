@@ -3,6 +3,8 @@ description: Start Goal mode with a goal text and budget. Usage: /neewe-goal "<t
 allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/bin/neewe goal *), Bash(${CLAUDE_PLUGIN_ROOT}/bin/neewe inline)
 ---
 
-Run the goal command with $ARGUMENTS, then show the inline status.
+Start Goal mode with $ARGUMENTS, then show the current status. Present the output directly.
 
-!`bash -lc 'bash ${CLAUDE_PLUGIN_ROOT}/bin/neewe goal $ARGUMENTS && bash ${CLAUDE_PLUGIN_ROOT}/bin/neewe inline'`
+!`bash ${CLAUDE_PLUGIN_ROOT}/bin/neewe goal $ARGUMENTS`
+
+!`bash ${CLAUDE_PLUGIN_ROOT}/bin/neewe inline`

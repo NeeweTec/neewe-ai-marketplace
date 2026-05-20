@@ -722,6 +722,42 @@ Lock file:     .neewe/.state.lock  (atomic mkdir-based, 5s stale threshold)
 EOF
 }
 
+cmd_start() {
+  # neewe start — one-shot bootstrap: init + l4-init + inline status view.
+  # Single entrypoint so the /neewe-start command body is one operation
+  # (no shell && / | that the permission checker would flag).
+  cmd_init
+  cmd_l4_init >/dev/null 2>&1 || true
+  echo ""
+  cmd_inline
+}
+
+cmd_stage() {
+  # neewe stage <name> — map a 7-step user stage to its internal phase,
+  # transition, then show the inline view. One operation for /neewe-stage.
+  local name="${1:-}"
+  local phase=""
+  case "$name" in
+    ground)       phase="discovery" ;;
+    plan)         phase="planning" ;;
+    dispatch)     phase="dispatch" ;;
+    orchestrate)  phase="orchestration" ;;
+    code)         phase="execution" ;;
+    finish)       phase="release" ;;
+    "")
+      echo "[neewe] ERROR: missing stage. Usage: neewe stage <ground|plan|dispatch|orchestrate|code|finish>" >&2
+      return 1
+      ;;
+    *)
+      echo "[neewe] ERROR: unknown stage '$name'. Try: ground | plan | dispatch | orchestrate | code | finish" >&2
+      return 1
+      ;;
+  esac
+  cmd_set_phase "$phase"
+  echo ""
+  cmd_inline
+}
+
 # ────────────────────────────────────────────────────────────────────────────
 # Dispatcher
 # ────────────────────────────────────────────────────────────────────────────
@@ -748,6 +784,8 @@ fi
 
 case "$1" in
   init)        cmd_init ;;
+  start)       cmd_start ;;
+  stage)       shift; cmd_stage "${1:-}" ;;
   show)        cmd_show ;;
   inline)      cmd_inline ;;
   set-phase)   shift; cmd_set_phase "${1:-}" ;;

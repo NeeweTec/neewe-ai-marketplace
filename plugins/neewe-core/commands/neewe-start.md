@@ -1,8 +1,8 @@
 ---
 description: Bootstrap a new NEEWE project in the current directory (creates .neewe/state.json, vault/, MNEME layout).
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/bin/neewe init), Bash(${CLAUDE_PLUGIN_ROOT}/bin/neewe l4-init), Bash(${CLAUDE_PLUGIN_ROOT}/bin/neewe inline)
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/bin/neewe start)
 ---
 
-Initialize NEEWE in the current working directory and show the result.
+Initialize NEEWE in the current working directory and show the result. Present the output directly.
 
-!`bash ${CLAUDE_PLUGIN_ROOT}/bin/neewe init && bash ${CLAUDE_PLUGIN_ROOT}/bin/neewe l4-init 2>&1 | tail -5 && echo "---" && bash ${CLAUDE_PLUGIN_ROOT}/bin/neewe inline`
+!`bash ${CLAUDE_PLUGIN_ROOT}/bin/neewe start`
