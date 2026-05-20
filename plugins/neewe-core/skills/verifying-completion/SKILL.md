@@ -118,7 +118,7 @@ For NEEWE projects, ensure `hooks/hooks.json` includes:
 }
 ```
 
-(This is illustrative — the canonical Stop hook for NEEWE will be wired in Sprint 4 alongside `neewe-goal`.)
+(This is illustrative — the canonical Stop hook for NEEWE is `cost-cap-guard.sh`, wired on the `Stop` event for Goal Mode. Start Goal Mode with the `/neewe-goal` command.)
 
 ## Tone
 
