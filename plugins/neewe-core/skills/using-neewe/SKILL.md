@@ -1,6 +1,6 @@
 ---
 name: using-neewe
-description: Auto-injected by SessionStart in every NEEWE project. Contains the non-negotiable NEEWE-LAW. For onboarding, read QUICK-START.md. For doctrine and architecture, read FRAMEWORK-REFERENCE.md.
+description: Use whenever you are operating inside a NEEWE-managed project. Defines the non-negotiable NEEWE-LAW, model routing, and tone. Auto-injected by SessionStart — for onboarding read QUICK-START.md, for doctrine read FRAMEWORK-REFERENCE.md.
 license: MIT
 ---
 

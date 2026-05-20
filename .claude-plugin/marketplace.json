@@ -8,15 +8,22 @@
   },
   "homepage": "https://github.com/NeeweTec/neewe-ai-marketplace",
   "repository": "https://github.com/NeeweTec/neewe-ai-marketplace",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "plugins": [
     {
       "name": "neewe-core",
       "source": "./plugins/neewe-core",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "category": "framework",
       "description": "NEEWE umbrella plugin — skills, agents, hooks, MCP, governance trio, MNEME memory, Goal Mode, Dashboard",
-      "keywords": ["agent", "governance", "framework", "squad", "goal-mode", "opus-plan-sonnet-execute"]
+      "keywords": [
+        "agent",
+        "governance",
+        "framework",
+        "squad",
+        "goal-mode",
+        "opus-plan-sonnet-execute"
+      ]
     },
     {
       "name": "neewe-stack-nextjs",
@@ -24,7 +31,13 @@
       "version": "1.0.0",
       "category": "stack",
       "description": "NEEWE stack-flavor satellite for Next.js (App Router + RSC). LSP + monitors + 5-axis pattern skills.",
-      "keywords": ["nextjs", "react", "typescript", "stack", "patterns"]
+      "keywords": [
+        "nextjs",
+        "react",
+        "typescript",
+        "stack",
+        "patterns"
+      ]
     },
     {
       "name": "neewe-stack-fastapi",
@@ -32,7 +45,13 @@
       "version": "1.0.0",
       "category": "stack",
       "description": "NEEWE stack-flavor satellite for FastAPI (async Python). LSP + monitors + 5-axis pattern skills.",
-      "keywords": ["fastapi", "python", "async", "stack", "patterns"]
+      "keywords": [
+        "fastapi",
+        "python",
+        "async",
+        "stack",
+        "patterns"
+      ]
     },
     {
       "name": "neewe-stack-django",
@@ -40,7 +59,13 @@
       "version": "1.0.0",
       "category": "stack",
       "description": "NEEWE stack-flavor satellite for Django (4.2+ / 5.x). LSP + monitors + 5-axis pattern skills.",
-      "keywords": ["django", "python", "orm", "stack", "patterns"]
+      "keywords": [
+        "django",
+        "python",
+        "orm",
+        "stack",
+        "patterns"
+      ]
     },
     {
       "name": "neewe-enterprise-governance",
@@ -48,7 +73,16 @@
       "version": "1.0.0",
       "category": "governance",
       "description": "NEEWE enterprise overlay — strict managed marketplaces, audit pipes, provenance bonds (EP-OPUS-12), compliance profiles (LGPD/SOC2/HIPAA/PCI).",
-      "keywords": ["enterprise", "governance", "audit", "compliance", "lgpd", "soc2", "hipaa", "provenance"]
+      "keywords": [
+        "enterprise",
+        "governance",
+        "audit",
+        "compliance",
+        "lgpd",
+        "soc2",
+        "hipaa",
+        "provenance"
+      ]
     }
   ]
 }

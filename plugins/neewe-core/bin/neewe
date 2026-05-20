@@ -170,14 +170,20 @@ cmd_show() {
 cmd_set_phase() {
   local phase="${1:-}"
   case "$phase" in
+    # Legacy phase names (Sprint 1–5 — kept for back-compat)
     00-intake|01-spec|02-plan|03-execute|04-validate|05-goal-mode) ;;
+    # 7-stage user flow (v0.8+ — emitted by /neewe-stage and TUI)
+    init|bootstrap|discovery|planning|dispatch|dispatching|orchestration|orchestrating|execution|verification|review|release|retro|finished) ;;
     "")
       echo "[neewe] ERROR: missing phase. Usage: neewe set-phase <phase>" >&2
-      echo "        Valid phases: 00-intake | 01-spec | 02-plan | 03-execute | 04-validate | 05-goal-mode" >&2
+      echo "        7-stage flow: init | discovery | planning | dispatch | orchestration | execution | release" >&2
+      echo "        Legacy:       00-intake | 01-spec | 02-plan | 03-execute | 04-validate | 05-goal-mode" >&2
       return 1
       ;;
     *)
-      echo "[neewe] ERROR: unknown phase '$phase'. Valid: 00-intake|01-spec|02-plan|03-execute|04-validate|05-goal-mode" >&2
+      echo "[neewe] ERROR: unknown phase '$phase'." >&2
+      echo "        7-stage flow: init | discovery | planning | dispatch | orchestration | execution | release" >&2
+      echo "        Legacy:       00-intake | 01-spec | 02-plan | 03-execute | 04-validate | 05-goal-mode" >&2
       return 1
       ;;
   esac
@@ -545,6 +551,133 @@ CMD
   echo "[neewe] next: edit CLAUDE.md to add project-specific doctrine; install graphify (pip install graphifyy) for T3 graph"
 }
 
+cmd_inline() {
+  # Markdown-rich status view designed to be rendered by Claude Code chat.
+  # Shows stage stepper + cost meter + active goal + last gates + last events.
+  if [ ! -f "$STATE_FILE" ]; then
+    cat <<EOF
+## NEEWE — not initialized
+
+No \`.neewe/state.json\` found in \`$(pwd)\`.
+
+**Next:** run \`/neewe-start\` (or in shell: \`neewe init\`) to bootstrap this project.
+EOF
+    return 0
+  fi
+
+  local PHASE MODE GOAL SQUAD PERM STYLE LOCALE CAP SPENT
+  PHASE=$(json_get "$STATE_FILE" "phase"); PHASE=${PHASE:-unknown}
+  MODE=$(json_get "$STATE_FILE" "mode"); MODE=${MODE:-balanced}
+  GOAL=$(json_get "$STATE_FILE" "active_goal"); GOAL=${GOAL:-(none)}
+  SQUAD=$(json_get "$STATE_FILE" "active_squad"); SQUAD=${SQUAD:-(none)}
+  PERM=$(json_get "$STATE_FILE" "permission_mode"); PERM=${PERM:-default}
+  STYLE=$(json_get "$STATE_FILE" "output_style"); STYLE=${STYLE:-NEEWE Startup}
+  LOCALE=$(json_get "$STATE_FILE" "locale.user_language"); LOCALE=${LOCALE:-en-US}
+  CAP=$(json_get "$STATE_FILE" "cost_budget.cap_usd"); CAP=${CAP:-0}
+  SPENT=$(json_get "$STATE_FILE" "cost_budget.spent_usd"); SPENT=${SPENT:-0}
+
+  # Map phase → 7-step stage index
+  local STAGE_IDX
+  case "$PHASE" in
+    init|bootstrap)          STAGE_IDX=0 ;;
+    discovery)               STAGE_IDX=1 ;;
+    planning)                STAGE_IDX=2 ;;
+    dispatch|dispatching)    STAGE_IDX=3 ;;
+    orchestration|orchestrating) STAGE_IDX=4 ;;
+    execution)               STAGE_IDX=5 ;;
+    verification|review|release|retro|finished) STAGE_IDX=6 ;;
+    *)                       STAGE_IDX=0 ;;
+  esac
+
+  # Build stepper line
+  local STAGES=("Initial" "Ground" "Plan" "Dispatch" "Orchestrate" "Code" "Finish")
+  local STEPPER=""
+  for i in 0 1 2 3 4 5 6; do
+    if [ "$i" -lt "$STAGE_IDX" ]; then
+      STEPPER+="◉ ${STAGES[$i]}"
+    elif [ "$i" -eq "$STAGE_IDX" ]; then
+      STEPPER+="**● ${STAGES[$i]}**"
+    else
+      STEPPER+="○ ${STAGES[$i]}"
+    fi
+    [ "$i" -lt 6 ] && STEPPER+=" → "
+  done
+
+  # Cost percent
+  local PCT
+  PCT=$(awk -v s="$SPENT" -v c="$CAP" 'BEGIN { if (c <= 0) print "0.0"; else printf "%.1f", (s / c) * 100 }')
+
+  # Cost bar (12 chars)
+  local FILLED EMPTY BAR
+  FILLED=$(awk -v p="$PCT" 'BEGIN { f = int(p * 12 / 100); if (f > 12) f = 12; print f }')
+  EMPTY=$((12 - FILLED))
+  BAR=""
+  for ((i=0; i<FILLED; i++)); do BAR+="█"; done
+  for ((i=0; i<EMPTY; i++)); do BAR+="░"; done
+
+  # Latest gate (if any)
+  local GATE_LINE=""
+  if [ -d ".neewe/gates" ]; then
+    local LATEST_PHASE LATEST_AGG QA TL PO
+    LATEST_PHASE=$(ls -1 .neewe/gates 2>/dev/null | head -1)
+    if [ -n "$LATEST_PHASE" ] && [ -f ".neewe/gates/$LATEST_PHASE/latest/aggregate.json" ]; then
+      LATEST_AGG=".neewe/gates/$LATEST_PHASE/latest/aggregate.json"
+      QA=$(json_get "$LATEST_AGG" "verdicts.qa")
+      TL=$(json_get "$LATEST_AGG" "verdicts.tech_lead")
+      PO=$(json_get "$LATEST_AGG" "verdicts.po")
+      GATE_LINE="| **Last gate** ($LATEST_PHASE) | QA: \`${QA:-—}\` · TL: \`${TL:-—}\` · PO: \`${PO:-—}\` |"
+    fi
+  fi
+
+  # Recent events (last 5)
+  local EVENTS=""
+  if [ -f ".neewe/vault/log.md" ]; then
+    EVENTS=$(grep -E '^## \[' .neewe/vault/log.md 2>/dev/null | tail -5 | sed 's/^## /- /')
+  fi
+
+  cat <<EOF
+## NEEWE — Current Stage
+
+$STEPPER
+
+| Field | Value |
+|---|---|
+| **Stage (internal phase)** | \`$PHASE\` |
+| **Mode** | \`$MODE\` |
+| **Active goal** | $GOAL |
+| **Active squad** | $SQUAD |
+| **Permission** | \`$PERM\` · style: \`$STYLE\` |
+| **Language** | \`$LOCALE\` |
+$GATE_LINE
+
+### Cost
+
+\`\`\`
+$BAR  ${PCT}%   \$$(printf '%.2f' "$SPENT") / \$$(printf '%.2f' "$CAP")
+\`\`\`
+
+EOF
+
+  if [ -n "$EVENTS" ]; then
+    cat <<EOF
+### Recent events
+
+$EVENTS
+
+EOF
+  fi
+
+  cat <<EOF
+### Next actions
+
+- \`/neewe-stage <name>\` to advance (names: \`ground\`, \`plan\`, \`dispatch\`, \`orchestrate\`, \`code\`, \`finish\`)
+- \`/neewe-dashboard\` to open the live web dashboard
+- \`/neewe-help\` for the full command reference
+
+> The interactive TUI (\`neewe-tui\`) runs only in a **separate terminal** — Claude Code chat uses these slash commands + dashboard instead.
+EOF
+}
+
 cmd_help() {
   cat <<'EOF'
 neewe — NEEWE Framework CLI
@@ -556,8 +689,10 @@ COMMANDS:
   init                    Create .neewe/state.json with defaults
   show                    Pretty-print current state
   set-phase <phase>       Atomically update phase + phase_started_at
-                          phases: 00-intake | 01-spec | 02-plan | 03-execute
-                                  | 04-validate | 05-goal-mode
+                          7-stage flow: init | discovery | planning | dispatch
+                                        | orchestration | execution | release
+                          legacy:       00-intake | 01-spec | 02-plan | 03-execute
+                                        | 04-validate | 05-goal-mode
   get <field>             Read a field (dot-path, e.g. model_routing.main)
   goal "<text>" [--budget USD]
                           Set active goal + reset spent + (optionally) set budget cap
@@ -577,7 +712,7 @@ EXAMPLES:
   neewe init
   neewe goal "Ship the /search endpoint" --budget 3.00
   neewe mode balanced
-  neewe set-phase 03-execute
+  neewe set-phase execution
   neewe cost-report
   neewe get cost_budget.spent_usd
 
@@ -591,21 +726,30 @@ EOF
 # Dispatcher
 # ────────────────────────────────────────────────────────────────────────────
 
-# No-arg invocation → open the TUI (v0.9.0 default front door).
-# Scripts continue to work for automation: any subcommand routes through the dispatcher below.
+# No-arg invocation has two modes:
+#   1. Inside Claude Code chat (or any non-TTY harness): print the inline
+#      markdown stage view — that's what the chat surface can actually render.
+#   2. Standalone terminal (TTY) without CLAUDECODE/CLAUDE_PLUGIN_ROOT: open
+#      the interactive Ink TUI.
+# Subcommands always work for automation.
 if [ $# -eq 0 ]; then
+  # Detection: if we're under Claude Code, OR stdout is not a TTY, render inline.
+  if [ -n "${CLAUDECODE:-}" ] || [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || [ ! -t 1 ]; then
+    cmd_inline
+    exit 0
+  fi
   TUI_BIN="$(dirname "${BASH_SOURCE[0]}")/neewe-tui"
   if [ -x "$TUI_BIN" ] || [ -f "$TUI_BIN" ]; then
     exec bash "$TUI_BIN"
   fi
-  # TUI launcher missing → fall back to help so the CLI never silent-fails.
-  cmd_help
+  cmd_inline
   exit 0
 fi
 
 case "$1" in
   init)        cmd_init ;;
   show)        cmd_show ;;
+  inline)      cmd_inline ;;
   set-phase)   shift; cmd_set_phase "${1:-}" ;;
   get)         shift; cmd_get "${1:-}" ;;
   goal)        shift; cmd_goal "$@" ;;

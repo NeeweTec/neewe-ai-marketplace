@@ -1,6 +1,6 @@
 ---
 name: neewe-l4-lint
-description: Use periodically (weekly) or before a release-gate transition. Reconciles the NEEWE vault (.neewe/vault/) against the structural graph (.neewe/graph/) to detect orphans (vault pages with no backlinks), contradictions (vault claims that disagree), stale claims (last_updated > 60 days), unverified assertions (vault says X depends on Y but graph has no X-Y edge), and undocumented connections (graph has high-confidence edges with no vault page).
+description: Use before a release-gate transition, or periodically (weekly). Reconciles the NEEWE vault (.neewe/vault/) against the structural graph (.neewe/graph/) to detect orphans (vault pages with no backlinks), contradictions (vault claims that disagree), stale claims (last_updated > 60 days), unverified assertions (vault says X depends on Y but graph has no X-Y edge), and undocumented connections (graph has high-confidence edges with no vault page).
 license: MIT
 disable-model-invocation: true
 allowed-tools: Bash(neewe-l4-mcp *) Bash(jq *) Read Write Glob Grep

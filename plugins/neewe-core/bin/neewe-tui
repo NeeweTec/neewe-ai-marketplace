@@ -17,6 +17,32 @@ if [ ! -d "$TUI_DIR" ]; then
   exit 1
 fi
 
+# Refuse to run inside Claude Code chat — the TUI would fight for the terminal.
+# Detect via CLAUDECODE env var or non-TTY stdout; guide the user to the right surface.
+if [ -n "${CLAUDECODE:-}" ] || [ ! -t 1 ]; then
+  cat <<'EOF' >&2
+neewe-tui: detected Claude Code chat environment (or non-interactive stdout).
+
+The Ink TUI takes over the terminal and cannot share it with Claude Code chat.
+Use one of these surfaces instead:
+
+  Inside this chat:
+    /neewe              show current stage as rich markdown
+    /neewe-start        bootstrap a new project
+    /neewe-stage <name> advance to a stage
+    /neewe-dashboard    print the dashboard URL
+    /neewe-help         full command reference
+
+  In a SEPARATE terminal window (Windows Terminal, iTerm2, etc.):
+    neewe               open the full Ink TUI
+
+  In any terminal (scripting):
+    neewe show          state as table
+    neewe show --json   raw JSON
+EOF
+  exit 2
+fi
+
 # Require Node 18+
 if ! command -v node >/dev/null 2>&1; then
   echo "neewe-tui: node not found in PATH. NEEWE TUI needs Node 18+." >&2
