@@ -1,6 +1,6 @@
 ---
 description: Switch cost/quality/speed mode. Usage: /neewe-mode <thrift|balanced|quality>
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/bin/neewe mode *), Bash(${CLAUDE_PLUGIN_ROOT}/bin/neewe inline)
+allowed-tools: Bash(bash *)
 ---
 
 Set the NEEWE mode to `$ARGUMENTS` and show the resulting state. Present the output directly.
