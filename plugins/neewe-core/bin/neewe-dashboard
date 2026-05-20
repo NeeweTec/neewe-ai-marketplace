@@ -28,6 +28,28 @@ const os = require('node:os');
 const HOME = os.homedir();
 const TOKEN_FILE = path.join(HOME, '.neewe', 'dashboard-token');
 const DEFAULT_PORT = 7878;
+const MAX_PORT_TRIES = 20;
+
+// Per-project runtime info so `token`/`url`/`stop` and the monitor can find the
+// actual port this project's dashboard bound to. Lives in the project's .neewe/
+// (relative to CWD), the same way state.json does — this is what makes the
+// dashboard multi-project safe: each project gets its own server + port + data.
+const DASHBOARD_INFO = path.join('.neewe', 'dashboard.json');
+
+function writeDashboardInfo(info) {
+  try {
+    fs.mkdirSync('.neewe', { recursive: true });
+    fs.writeFileSync(DASHBOARD_INFO, JSON.stringify(info, null, 2));
+  } catch (_) {}
+}
+
+function readDashboardInfo() {
+  try { return JSON.parse(fs.readFileSync(DASHBOARD_INFO, 'utf8')); } catch (_) { return null; }
+}
+
+function removeDashboardInfo() {
+  try { fs.unlinkSync(DASHBOARD_INFO); } catch (_) {}
+}
 
 // Locate the dashboard UI dir (plugin-relative).
 function findUiDir() {
@@ -320,10 +342,40 @@ function startServer(port, token, uiDir) {
     }
   }, 60_000);
 
-  server.listen(port, '127.0.0.1', () => {
-    console.error(`[neewe-dashboard] listening on http://127.0.0.1:${port}/?token=${token}`);
+  // Resilient bind: if the preferred port is taken (another project's dashboard,
+  // or an orphan), step to the next free port instead of hard-failing the monitor.
+  let activePort = port;
+  let tries = 0;
+  server.on('error', (err) => {
+    if (err && err.code === 'EADDRINUSE' && tries < MAX_PORT_TRIES) {
+      tries++;
+      activePort++;
+      setTimeout(() => server.listen(activePort, '127.0.0.1'), 50);
+    } else {
+      console.error(`[neewe-dashboard] fatal: ${err && err.message ? err.message : err}`);
+      process.exit(1);
+    }
+  });
+
+  server.listen(activePort, '127.0.0.1', () => {
+    writeDashboardInfo({
+      port: activePort,
+      pid: process.pid,
+      url: `http://127.0.0.1:${activePort}/?token=${token}`,
+      project: process.cwd(),
+      started_at: new Date().toISOString(),
+    });
+    console.error(`[neewe-dashboard] listening on http://127.0.0.1:${activePort}/?token=${token}`);
+    console.error(`[neewe-dashboard] project: ${process.cwd()}`);
     console.error(`[neewe-dashboard] token file: ${TOKEN_FILE}`);
   });
+
+  // Clean up the per-project info file on shutdown (idle auto-exit, SIGTERM from
+  // session end, Ctrl-C) so a stale port/pid never misleads the next start.
+  const cleanup = () => { removeDashboardInfo(); try { server.close(); } catch (_) {} };
+  process.on('SIGINT', () => { cleanup(); process.exit(0); });
+  process.on('SIGTERM', () => { cleanup(); process.exit(0); });
+  process.on('exit', cleanup);
 
   return server;
 }
@@ -335,6 +387,26 @@ const cmd = args[0] || 'help';
 
 if (cmd === 'token') {
   process.stdout.write(ensureToken() + '\n');
+  process.exit(0);
+}
+
+if (cmd === 'url') {
+  // Print the full URL for THIS project's running dashboard (actual bound port).
+  // Falls back to the default port if no dashboard is currently running.
+  const info = readDashboardInfo();
+  const token = ensureToken();
+  const port = info && info.port ? info.port : DEFAULT_PORT;
+  process.stdout.write(`http://127.0.0.1:${port}/?token=${token}\n`);
+  process.exit(0);
+}
+
+if (cmd === 'stop') {
+  // Stop THIS project's dashboard (used by the SessionEnd hook and manually).
+  const info = readDashboardInfo();
+  if (info && info.pid) {
+    try { process.kill(info.pid); } catch (_) {}
+  }
+  removeDashboardInfo();
   process.exit(0);
 }
 
@@ -353,14 +425,20 @@ if (cmd === 'start') {
 }
 
 // help
-process.stdout.write(`neewe-dashboard — EP-OPUS-13 local web UI (Sprint 5 wave 3)
+process.stdout.write(`neewe-dashboard — EP-OPUS-13 local web UI
 
 USAGE:
-  neewe-dashboard start [--port N]   Start server (default 7878)
-  neewe-dashboard token              Print auth token
+  neewe-dashboard start [--port N]   Start server (preferred port N, default 7878;
+                                     auto-steps to the next free port if taken)
+  neewe-dashboard url                Print this project's URL+token (actual port)
+  neewe-dashboard token              Print auth token only
+  neewe-dashboard stop               Stop this project's dashboard
   neewe-dashboard help               This help
 
+Multi-project: each project binds its own port and serves its own .neewe/ data.
+The bound port + pid are recorded in .neewe/dashboard.json (per project).
+
 Token file: ${TOKEN_FILE}
-Open: http://127.0.0.1:7878/?token=<token>
+Get the URL:  neewe-dashboard url
 `);
 process.exit(0);

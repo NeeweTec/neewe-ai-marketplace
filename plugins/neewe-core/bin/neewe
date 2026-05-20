@@ -535,7 +535,7 @@ CMD
   local gi=".gitignore"
   local entries=(
     ".neewe/state.json" ".neewe/.cost-log" ".neewe/.state.lock"
-    ".neewe/handoffs/" ".neewe/gates/" ".neewe/dashboard-token"
+    ".neewe/handoffs/" ".neewe/gates/" ".neewe/dashboard-token" ".neewe/dashboard.json"
     ".neewe/vault/.obsidian/"
   )
   if [ -f "$gi" ]; then

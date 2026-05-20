@@ -1,7 +1,7 @@
 [
   {
     "name": "neewe-dashboard",
-    "command": "node ${CLAUDE_PLUGIN_ROOT}/bin/neewe-dashboard start --port 7878",
-    "description": "NEEWE local web dashboard at http://127.0.0.1:7878/ (EP-OPUS-13). Token: ~/.neewe/dashboard-token. Auto-exits after 10 min idle. Run 'neewe-dashboard token' to print the auth token."
+    "command": "node ${CLAUDE_PLUGIN_ROOT}/bin/neewe-dashboard start",
+    "description": "NEEWE local web dashboard (EP-OPUS-13). Per-project: binds a free port starting at 7878 and serves this project's .neewe/ data. Run 'neewe-dashboard url' to print the URL+token. Auto-exits after 10 min idle; stopped on session end."
   }
 ]
