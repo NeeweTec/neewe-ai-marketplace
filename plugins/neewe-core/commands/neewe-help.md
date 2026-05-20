@@ -10,7 +10,7 @@ Present the NEEWE command reference to the user. Do not add commentary unless th
 
 | Command | What it does |
 |---|---|
-| `/neewe` | Show current stage + cost + gates + recent events (inline markdown view) |
+| `/neewe-status` | Show current stage + cost + gates + recent events (inline markdown view) |
 | `/neewe-start` | Bootstrap NEEWE in the current directory |
 | `/neewe-stage <name>` | Advance to a stage (`ground`, `plan`, `dispatch`, `orchestrate`, `code`, `finish`) |
 | `/neewe-goal "<text>" --budget 5.00` | Start Goal mode with a budget cap |

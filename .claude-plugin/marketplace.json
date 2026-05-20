@@ -8,12 +8,12 @@
   },
   "homepage": "https://github.com/NeeweTec/neewe-ai-marketplace",
   "repository": "https://github.com/NeeweTec/neewe-ai-marketplace",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "plugins": [
     {
       "name": "neewe-core",
       "source": "./plugins/neewe-core",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "category": "framework",
       "description": "NEEWE umbrella plugin — skills, agents, hooks, MCP, governance trio, MNEME memory, Goal Mode, Dashboard",
       "keywords": [

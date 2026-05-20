@@ -6,7 +6,7 @@ NEEWE has **three surfaces**. Pick whichever fits your moment:
 
 | Surface | When | Command |
 |---|---|---|
-| **Slash commands** (in this chat) | Day-to-day work inside Claude Code | `/neewe`, `/neewe-start`, `/neewe-stage <name>` |
+| **Slash commands** (in this chat) | Day-to-day work inside Claude Code | `/neewe-status`, `/neewe-start`, `/neewe-stage <name>` |
 | **Web dashboard** (browser) | Live cost / gates / events visualization | `/neewe-dashboard` then open the URL |
 | **Ink TUI** (separate terminal) | Premium visual interface, ambient monitor | `neewe` in a 2nd terminal window |
 
@@ -30,7 +30,7 @@ In this chat:
 
 ```
 /neewe-start
-/neewe
+/neewe-status
 ```
 
 You'll see the stage stepper, your active goal, cost meter, and last events as inline markdown. From there, advance stages with `/neewe-stage <name>` or open the dashboard with `/neewe-dashboard`.
@@ -39,12 +39,12 @@ You'll see the stage stepper, your active goal, cost meter, and last events as i
 
 - **Phases, modes, archetypes, verdicts** — internal vocabulary. Slash commands use the natural names (stages).
 - **Hook events, gate names, EP-OPUS codes** — automation surface. You see results, not internals.
-- **JSON schemas** — `/neewe` renders a table. `neewe show --json` exists if you script.
+- **JSON schemas** — `/neewe-status` renders a table. `neewe show --json` exists if you script.
 
 ## When You Get Stuck
 
 - `/neewe-help` — full reference
-- `/neewe` — what stage you're in, cost so far, last gate result
+- `/neewe-status` — what stage you're in, cost so far, last gate result
 - `/neewe-dashboard` — URL for the live web view
 
 ## Three Things Worth Knowing
